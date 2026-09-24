@@ -104,6 +104,90 @@ def get_cases_summary():
     return summary_list
 
 
+def build_lifecycle_trace(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    c = data.get("case", {})
+    meta = data.get("trigger_meta", {})
+    nba = data.get("next_best_actions", {})
+    sar = data.get("sar", {})
+    ev_reqs = data.get("evidence_requests", [])
+    
+    cid = meta.get("customer_id", "C12382")
+    flagged_tid = meta.get("flagged_txn_id", "3514030")
+    trigger_type = meta.get("trigger_type", "risk_score")
+    risk_score = meta.get("risk_score", 0.61)
+    pattern = c.get("pattern", "unknown")
+    exposure = c.get("exposure_usd", 0.0)
+    fraud_prob = c.get("fraud_probability", 0.5)
+    
+    trace = [
+        {
+            "step": 1,
+            "title": "Trigger",
+            "icon": "fa-bell",
+            "status": "completed",
+            "summary": f"Investigation triggered by {trigger_type} on transaction {flagged_tid} (Risk score: {risk_score or 'N/A'}).",
+            "details": meta.get("trigger_text", f"Real-time event triggered on transaction {flagged_tid}.")
+        },
+        {
+            "step": 2,
+            "title": "Investigate",
+            "icon": "fa-magnifying-glass-chart",
+            "status": "completed",
+            "summary": f"Opened case {c.get('graph_case_id', 'TG-CASE-' + data.get('case_id', ''))} for customer {cid}.",
+            "details": f"Traversed customer transaction history ({data.get('customer_txns_total', 0)} txns), checked connected cards ({len(c.get('connected_card_ids', []))}), and queried multi-hop graph neighborhood."
+        },
+        {
+            "step": 3,
+            "title": "Gather Evidence",
+            "icon": "fa-scale-balanced",
+            "status": "completed",
+            "summary": f"Collected {len(c.get('evidence', []))} verified graph claims and precedent linkages.",
+            "details": f"Subgraphs retrieved via TigerGraph GSQL queries. Identified pattern '{pattern}' with exposure ${exposure:.2f}."
+        },
+        {
+            "step": 4,
+            "title": "Assess Uncertainty",
+            "icon": "fa-chart-pie",
+            "status": "completed",
+            "summary": f"Risk probability assessed at {int(fraud_prob * 100)}% (Uncertainty: {round(1.0 - fraud_prob, 2) if fraud_prob < 0.7 else 0.05}).",
+            "details": "Rule R1 evaluated: " + ("Probability < 0.70 on single signal requires customer verification before blocking." if fraud_prob < 0.70 else "Severe multi-signal threshold met.")
+        },
+        {
+            "step": 5,
+            "title": "Gather More Evidence",
+            "icon": "fa-mobile-screen-button",
+            "status": "interactive",
+            "summary": f"Dispatched 2-Factor push challenge: {ev_reqs[0].get('type') if ev_reqs else 'customer_validation'}.",
+            "details": ev_reqs[0].get('assumed_response', 'Customer challenge initiated.') if ev_reqs else 'Awaiting cardholder verification via Secure Enclave.'
+        },
+        {
+            "step": 6,
+            "title": "Take Next Actions",
+            "icon": "fa-route",
+            "status": "completed",
+            "summary": f"Pre-NBA: {', '.join([a.get('action') for a in nba.get('initial', [])])} -> Post-NBA: {', '.join([a.get('action') for a in nba.get('final', [])])}.",
+            "details": f"Policy route evaluated: auto / L1 / L2 under Rules R1 to R10."
+        },
+        {
+            "step": 7,
+            "title": "Explain Decision",
+            "icon": "fa-comments",
+            "status": "completed",
+            "summary": nba.get("what_changed", "Policy decision documented."),
+            "details": f"FinCEN SAR Filing: {'MANDATORY (Reason: ' + sar.get('reason', '') + ')' if sar.get('file') else 'NOT FILED (Legitimate/Cleared)'}."
+        },
+        {
+            "step": 8,
+            "title": "Update Case Memory",
+            "icon": "fa-database",
+            "status": "completed",
+            "summary": f"Committed case state to TigerGraph Savanna as {c.get('graph_case_id', 'TG-CASE')}.",
+            "details": f"Indexed decision and topology memory for future cross-case similarity lookups ({len(c.get('similar_prior_cases', []))} precedents referenced)."
+        }
+    ]
+    return trace
+
+
 @app.get("/api/v1/cases/{case_id}", response_model=Dict[str, Any])
 def get_case_details(case_id: str):
     """Retrieves full case dossier, findings, GSQL metrics, SAR reports, and real IEEE-CIS transaction feed."""
@@ -139,7 +223,11 @@ def get_case_details(case_id: str):
     similar_ids = data.get("case", {}).get("similar_prior_cases", [])
     data["similar_prior_cases_details"] = [closed_cases_map[sid] for sid in similar_ids if sid in closed_cases_map]
     
+    # Attach 8-step lifecycle progression trace
+    data["lifecycle_trace"] = build_lifecycle_trace(data)
+    
     return data
+
 
 
 @app.post("/api/v1/simulate-response")
@@ -420,8 +508,44 @@ def get_dashboard():
                 </div>
             </div>
 
+            <!-- OFFICIAL 8-STEP LIFECYCLE PROGRESSION (README-2.md Compliance) -->
+            <div class="card-surface rounded-2xl p-5 border border-slate-200/90 shadow-xs">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-2">
+                        <h2 class="text-sm font-extrabold text-[#0A1F1A] uppercase tracking-tight flex items-center gap-2">
+                            <i class="fa-solid fa-arrows-spin text-[#00836C]"></i> Fraud Case Lifecycle (8-Step Engine)
+                        </h2>
+                        <span class="text-[10px] font-bold px-2 py-0.5 rounded badge-tg">README-2.md Standard</span>
+                    </div>
+                    <span class="text-[11px] text-[#7D8D86] font-medium hidden sm:inline">Click any step to inspect execution payload</span>
+                </div>
+
+                <!-- 8 Step Horizontal Grid -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2" id="lifecycle-steps-grid">
+                    <!-- Injected via JS -->
+                </div>
+
+                <!-- Active Step Detail Callout -->
+                <div id="lifecycle-step-detail" class="mt-3 p-3.5 rounded-xl bg-slate-50/80 border border-slate-200/90 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div class="flex items-start sm:items-center gap-3">
+                        <div id="step-detail-icon" class="h-8 w-8 rounded-lg bg-[#00836C] text-white flex items-center justify-center text-sm font-bold shrink-0 shadow-xs">
+                            <i class="fa-solid fa-bell"></i>
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <span id="step-detail-title" class="font-extrabold text-[#0A1F1A]">Step 1: Trigger</span>
+                                <span id="step-detail-badge" class="px-2 py-0.2 rounded-full text-[9px] font-extrabold bg-emerald-100 text-emerald-800 uppercase">Completed</span>
+                            </div>
+                            <p id="step-detail-summary" class="text-[#46584F] text-[11px] mt-0.5">Real-time model score triggered investigation.</p>
+                        </div>
+                    </div>
+                    <span id="step-detail-timing" class="text-[10px] text-slate-500 font-mono shrink-0">TigerGraph Engine</span>
+                </div>
+            </div>
+
             <!-- UNIFIED NEXT-BEST ACTION PIPELINE (Alpha-Fin 3-Step Stepper) -->
             <div class="card-surface rounded-2xl p-6 border-2 border-[#00836C]/30 shadow-md">
+
                 <div class="flex items-center justify-between mb-4">
                     <div>
                         <div class="flex items-center gap-2">
@@ -882,6 +1006,9 @@ def get_dashboard():
                 document.getElementById('active-prob-text').className = "text-lg font-extrabold text-orange-600";
             }
 
+            // OFFICIAL 8-STEP LIFECYCLE PROGRESSION
+            renderLifecycle(data.lifecycle_trace || []);
+
             // STAGE 1 Actions
             const stage1Div = document.getElementById('stage1-actions');
             stage1Div.innerHTML = '';
@@ -897,6 +1024,7 @@ def get_dashboard():
                 `;
                 stage1Div.appendChild(item);
             });
+
 
             // STAGE 2 Phone Simulator
             resetPhoneSimulator(data);
@@ -1182,7 +1310,68 @@ def get_dashboard():
             }, 3200);
         }
 
+        function renderLifecycle(trace) {
+            const grid = document.getElementById('lifecycle-steps-grid');
+            if (!grid) return;
+            grid.innerHTML = '';
+            if (!trace || trace.length === 0) return;
+
+            trace.forEach((step, idx) => {
+                const card = document.createElement('button');
+                card.id = `step-btn-${step.step}`;
+                card.className = `p-2.5 rounded-xl border text-left transition flex flex-col justify-between h-20 shadow-xs ${idx === 0 ? 'bg-emerald-50/80 border-emerald-500 ring-2 ring-emerald-200' : 'bg-white border-slate-200 hover:border-[#00836C]/60 hover:bg-slate-50'}`;
+                card.onclick = () => selectStep(step, card);
+
+                card.innerHTML = `
+                    <div class="flex items-center justify-between w-full">
+                        <span class="h-5 w-5 rounded-full ${idx === 0 ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-700'} flex items-center justify-center font-extrabold text-[10px]">${step.step}</span>
+                        <i class="fa-solid ${step.icon} ${idx === 0 ? 'text-emerald-700' : 'text-slate-400'} text-xs"></i>
+                    </div>
+                    <div>
+                        <span class="font-extrabold text-[11px] text-[#0A1F1A] block truncate">${step.title}</span>
+                        <span class="text-[9px] text-[#7D8D86] block truncate">${step.status}</span>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+
+            selectStep(trace[0], grid.children[0]);
+        }
+
+        function selectStep(step, elem) {
+            const grid = document.getElementById('lifecycle-steps-grid');
+            if (grid) {
+                Array.from(grid.children).forEach(c => {
+                    c.className = 'p-2.5 rounded-xl border text-left transition flex flex-col justify-between h-20 shadow-xs bg-white border-slate-200 hover:border-[#00836C]/60 hover:bg-slate-50';
+                    const num = c.querySelector('span');
+                    if (num) num.className = 'h-5 w-5 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center font-extrabold text-[10px]';
+                });
+            }
+
+            if (elem) {
+                elem.className = 'p-2.5 rounded-xl border text-left transition flex flex-col justify-between h-20 shadow-xs bg-emerald-50/90 border-emerald-500 ring-2 ring-emerald-200';
+                const num = elem.querySelector('span');
+                if (num) num.className = 'h-5 w-5 rounded-full bg-emerald-600 text-white flex items-center justify-center font-extrabold text-[10px]';
+            }
+
+            const iconDiv = document.getElementById('step-detail-icon');
+            if (iconDiv) iconDiv.innerHTML = `<i class="fa-solid ${step.icon}"></i>`;
+            
+            const titleElem = document.getElementById('step-detail-title');
+            if (titleElem) titleElem.innerText = `Step ${step.step}: ${step.title}`;
+            
+            const sumElem = document.getElementById('step-detail-summary');
+            if (sumElem) sumElem.innerText = `${step.summary} — ${step.details}`;
+
+            const badgeElem = document.getElementById('step-detail-badge');
+            if (badgeElem) {
+                badgeElem.innerText = step.status.toUpperCase();
+                badgeElem.className = step.status === 'interactive' ? "px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-orange-100 text-orange-800 uppercase animate-pulse" : "px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-100 text-emerald-800 uppercase";
+            }
+        }
+
         function toggleSarModal() {
+
             const modal = document.getElementById('sar-modal');
             if (modal.classList.contains('hidden')) {
                 if (activeCaseData && activeCaseData.sar) {

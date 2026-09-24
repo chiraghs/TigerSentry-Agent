@@ -1,203 +1,203 @@
 """
-GraphRAG & Policy Grounding Engine
-Encapsulates bank fraud policies, the 5 known fraud patterns,
-regulatory reporting triggers (SAR), and provides contextual prompt grounding.
+Official Fraud Policy & Regulatory Rules Engine
+Implements rules R1 through R10 and approval routing from Fraud Policy v1.0.
 """
 
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from src.agent.models import (
-    PolicyRuleMatch,
-    FraudPatternType,
-    GraphEvidence,
-    SARReport,
+    PolicyAction,
     ApprovalRoute,
-    ActionType,
-    Transaction,
+    ActionItem,
+    FraudPattern,
+    CaseVerdict,
+    SAR,
 )
 
 
 class PolicyEngine:
-    """Evaluates transactions and graph evidence against bank fraud policies and typologies."""
+    """Evaluates fraud cases against Bank Fraud Policy v1.0 and regulatory mandates."""
 
-    KNOWN_PATTERNS = {
-        FraudPatternType.CARD_TESTING_VELOCITY: {
-            "name": "Card Testing Velocity",
-            "description": "Rapid succession of multiple transactions testing card validity.",
-            "threshold_txns_1h": 5,
-            "risk_score_min": 0.65,
-        },
-        FraudPatternType.DEVICE_IDENTITY_RING: {
-            "name": "Device Identity Ring",
-            "description": "Single device or IP footprint shared across multiple unrelated accounts/cards.",
-            "threshold_shared_cards": 3,
-            "threshold_shared_customers": 2,
-        },
-        FraudPatternType.IMPOSSIBLE_TRAVEL: {
-            "name": "Impossible Travel",
-            "description": "Consecutive transactions separated by distance requiring impossible transit speed (>800 km/h).",
-            "speed_threshold_kmh": 800.0,
-        },
-        FraudPatternType.ACCOUNT_TAKEOVER: {
-            "name": "Account Takeover (ATO)",
-            "description": "High-amount transactions originating from unrecognized device/IP on established account.",
-            "amount_threshold": 800.0,
-        },
-        FraudPatternType.MERCHANT_COLLUSION: {
-            "name": "Merchant Collusion / Bust-Out",
-            "description": "Transactions concentrated at flagged high-risk merchants with history of fraudulent disputes.",
-        },
-    }
+    def route_action(self, action: PolicyAction, exposure_usd: float = 0.0) -> ApprovalRoute:
+        """Determines the required approval route according to Section 2 of Fraud Policy."""
+        if action in [
+            PolicyAction.ALLOW_TRANSACTION,
+            PolicyAction.MONITOR_CARD,
+            PolicyAction.MONITOR_CONNECTED_CARDS,
+            PolicyAction.WARN_CUSTOMER,
+            PolicyAction.VERIFY_WITH_CUSTOMER,
+            PolicyAction.STEP_UP_AUTH,
+            PolicyAction.GENERATE_REPORT,
+            PolicyAction.CREATE_CASE,
+            PolicyAction.ESCALATE_TO_ANALYST,
+            PolicyAction.CLOSE_NO_FRAUD,
+        ]:
+            return ApprovalRoute.AUTO
 
-    BANK_POLICIES = [
-        {
-            "id": "POL-101",
-            "name": "High Risk Containment",
-            "condition": "Risk score >= 0.85 OR active device ring >= 3 cards",
-            "mandated_action": ActionType.BLOCK_CARD,
-            "approval": ApprovalRoute.AUTOMATED,
-            "regulatory_ref": "Internal Risk Policy Sec 4.1",
-        },
-        {
-            "id": "POL-102",
-            "name": "Controlled Customer Verification",
-            "condition": "Moderate risk (0.40 <= risk <= 0.84) with high uncertainty",
-            "mandated_action": ActionType.REQUEST_CUSTOMER_CONFIRMATION,
-            "approval": ApprovalRoute.AUTOMATED,
-            "regulatory_ref": "Customer Authentication Guidelines (FFIEC)",
-        },
-        {
-            "id": "POL-103",
-            "name": "Senior Management Approval for Account Freeze",
-            "condition": "Account-level freeze requested",
-            "mandated_action": ActionType.FREEZE_ACCOUNT,
-            "approval": ApprovalRoute.L2_RISK_MANAGER,
-            "regulatory_ref": "Bank Operational Risk Policy Sec 8.2",
-        },
-        {
-            "id": "POL-104",
-            "name": "Mandatory SAR Filing",
-            "condition": "Confirmed or strongly suspected fraud with cumulative exposure >= $5,000",
-            "mandated_action": ActionType.FILE_SAR,
-            "approval": ApprovalRoute.COMPLIANCE_LEGAL,
-            "regulatory_ref": "FinCEN BSA 31 CFR 1020.320",
-        },
-    ]
+        if action == PolicyAction.DECLINE_TRANSACTION:
+            return ApprovalRoute.L1
 
-    def evaluate_graph_patterns(self, evidence: GraphEvidence, txn: Transaction) -> List[FraudPatternType]:
-        """Detects presence of any of the 5 known fraud typologies."""
-        detected = []
+        if action == PolicyAction.BLOCK_CARD:
+            return ApprovalRoute.L1 if exposure_usd <= 2500.0 else ApprovalRoute.L2
 
-        # 1. Device Ring
-        if (
-            evidence.shared_device_card_count >= self.KNOWN_PATTERNS[FraudPatternType.DEVICE_IDENTITY_RING]["threshold_shared_cards"]
-            or evidence.shared_device_customer_count >= self.KNOWN_PATTERNS[FraudPatternType.DEVICE_IDENTITY_RING]["threshold_shared_customers"]
-        ):
-            detected.append(FraudPatternType.DEVICE_IDENTITY_RING)
+        if action in [PolicyAction.BLOCK_ALL_CARDS, PolicyAction.FILE_REPORT]:
+            return ApprovalRoute.L2
 
-        # 2. Velocity
-        if (
-            evidence.velocity_1h_txn_count >= self.KNOWN_PATTERNS[FraudPatternType.CARD_TESTING_VELOCITY]["threshold_txns_1h"]
-            or txn.model_risk_score > 0.80
-        ):
-            detected.append(FraudPatternType.CARD_TESTING_VELOCITY)
+        return ApprovalRoute.AUTO
 
-        # 3. Impossible Travel
-        if evidence.impossible_travel_detected:
-            detected.append(FraudPatternType.IMPOSSIBLE_TRAVEL)
+    def evaluate_initial_actions(
+        self,
+        fraud_prob: float,
+        pattern: FraudPattern,
+        exposure_usd: float,
+        is_single_signal: bool,
+        is_card_testing: bool = False,
+    ) -> List[ActionItem]:
+        """
+        Determines the initial next-best actions before requesting additional evidence.
+        """
+        actions: List[ActionItem] = []
 
-        # 4. ATO
-        if txn.amount > 1000.0 and evidence.shared_ip_customer_count > 1:
-            detected.append(FraudPatternType.ACCOUNT_TAKEOVER)
+        # R5: Card testing sequence
+        if is_card_testing or pattern == FraudPattern.CARD_TESTING:
+            if exposure_usd > 100.0:
+                route = self.route_action(PolicyAction.BLOCK_CARD, exposure_usd)
+                actions.append(ActionItem(action=PolicyAction.BLOCK_CARD, route=route, reason="R5: testing sequence observed, purchase already cleared"))
+            else:
+                actions.append(ActionItem(action=PolicyAction.DECLINE_TRANSACTION, route=ApprovalRoute.L1, reason="R5: testing sequence observed"))
+                actions.append(ActionItem(action=PolicyAction.STEP_UP_AUTH, route=ApprovalRoute.AUTO, reason="R5: step-up authentication challenge required"))
+            actions.append(ActionItem(action=PolicyAction.CREATE_CASE, route=ApprovalRoute.AUTO, reason="R5: card testing requires internal case record"))
+            return actions
 
-        if not detected and txn.model_risk_score > 0.50:
-            detected.append(FraudPatternType.UNKNOWN_ANOMALOUS)
+        # R1: Weak signal (< 0.70) on a single signal -> verify before blocking
+        if is_single_signal and fraud_prob < 0.70:
+            actions.append(ActionItem(
+                action=PolicyAction.VERIFY_WITH_CUSTOMER,
+                route=ApprovalRoute.AUTO,
+                reason="R1: probability below 0.70 on single signal, verify before blocking",
+            ))
+            if exposure_usd > 0:
+                actions.append(ActionItem(
+                    action=PolicyAction.MONITOR_CARD,
+                    route=ApprovalRoute.AUTO,
+                    reason="R1: card placed on 72h elevated monitoring pending verification",
+                ))
+            return actions
 
-        return detected
+        # Strong signal (> 0.70)
+        if fraud_prob >= 0.70:
+            route = self.route_action(PolicyAction.BLOCK_CARD, exposure_usd)
+            actions.append(ActionItem(action=PolicyAction.BLOCK_CARD, route=route, reason=f"Strong fraud indicators (prob {fraud_prob:.2f})"))
+            actions.append(ActionItem(action=PolicyAction.CREATE_CASE, route=ApprovalRoute.AUTO, reason="Section 3a: case creation warranted for high probability fraud"))
+            if exposure_usd > 1000.0 or pattern in [FraudPattern.CARD_NOT_PRESENT_NEW_DEVICE, FraudPattern.ACCOUNT_TAKEOVER]:
+                actions.append(ActionItem(action=PolicyAction.FILE_REPORT, route=ApprovalRoute.L2, reason="Section 3a: confirmed/strong fraud with exposure > $1,000"))
+            return actions
 
-    def evaluate_policy_matches(self, patterns: List[FraudPatternType], txn: Transaction, evidence: GraphEvidence) -> List[PolicyRuleMatch]:
-        """Maps detected patterns and transaction attributes to formal policy rules."""
-        matches = []
+        # Default low risk
+        actions.append(ActionItem(action=PolicyAction.ALLOW_TRANSACTION, route=ApprovalRoute.AUTO, reason="Low risk signal, activity within normal parameters"))
+        return actions
 
-        if txn.model_risk_score >= 0.85 or FraudPatternType.DEVICE_IDENTITY_RING in patterns:
-            matches.append(
-                PolicyRuleMatch(
-                    rule_id="POL-101",
-                    rule_name="High Risk Immediate Containment",
-                    severity="HIGH",
-                    description="Transaction model risk score >= 0.85 or linked to multi-card device ring.",
-                    regulatory_reference="Internal Risk Policy Sec 4.1",
-                )
+    def evaluate_final_actions(
+        self,
+        initial_actions: List[ActionItem],
+        assumed_response: str,
+        fraud_prob: float,
+        exposure_usd: float,
+        has_shared_origin: bool = False,
+        connected_cards: List[str] = None,
+    ) -> Tuple[List[ActionItem], str]:
+        """
+        Determines the final next-best actions AFTER assumed evidence response.
+        """
+        connected_cards = connected_cards or []
+        resp_lower = assumed_response.lower()
+
+        # R3: Customer confirms transaction
+        if "confirm" in resp_lower or "yes" in resp_lower or "authorized" in resp_lower:
+            final_actions = [
+                ActionItem(action=PolicyAction.ALLOW_TRANSACTION, route=ApprovalRoute.AUTO, reason="R3: customer confirmed transaction authenticity"),
+                ActionItem(action=PolicyAction.CLOSE_NO_FRAUD, route=ApprovalRoute.AUTO, reason="R3: case closed as false alarm after cardholder verification"),
+            ]
+            change = "Customer confirmation cleared the alert; recommended actions updated to allow transaction and close case."
+            return final_actions, change
+
+        # R2: Customer denies transaction
+        if "deni" in resp_lower or "not make" in resp_lower or "fraud" in resp_lower or "did not" in resp_lower:
+            route = self.route_action(PolicyAction.BLOCK_CARD, exposure_usd)
+            final_actions = [
+                ActionItem(action=PolicyAction.BLOCK_CARD, route=route, reason=f"R2: customer denied transaction; exposure ${exposure_usd:.2f}"),
+                ActionItem(action=PolicyAction.CREATE_CASE, route=ApprovalRoute.AUTO, reason="R2: case record opened in graph"),
+            ]
+            if exposure_usd > 1000.0 or has_shared_origin or len(connected_cards) > 0:
+                final_actions.append(ActionItem(
+                    action=PolicyAction.FILE_REPORT,
+                    route=ApprovalRoute.L2,
+                    reason="R2 and Section 3a: customer denied unauthorized use with exposure > $1,000 or shared origin",
+                ))
+            if has_shared_origin or len(connected_cards) > 0:
+                final_actions.append(ActionItem(
+                    action=PolicyAction.MONITOR_CONNECTED_CARDS,
+                    route=ApprovalRoute.AUTO,
+                    reason=f"R6: shared infrastructure links this case to {len(connected_cards)} other cards",
+                ))
+            change = f"Customer denial confirmed fraud (probability raised to {fraud_prob:.2f}), confirming card block and triggering case creation."
+            return final_actions, change
+
+        # R4: No reply / timeout
+        if "timeout" in resp_lower or "no reply" in resp_lower:
+            final_actions = [
+                ActionItem(action=PolicyAction.DECLINE_TRANSACTION, route=ApprovalRoute.L1, reason="R4: pending authorization declined after no response within window"),
+                ActionItem(action=PolicyAction.MONITOR_CARD, route=ApprovalRoute.AUTO, reason="R4: card placed under 72h monitoring"),
+            ]
+            if exposure_usd > 500.0:
+                final_actions.append(ActionItem(action=PolicyAction.ESCALATE_TO_ANALYST, route=ApprovalRoute.AUTO, reason="R4: exposure exceeds $500 on unverified transaction"))
+            change = "Customer challenge timed out without response; actions updated to decline transaction and elevate monitoring."
+            return final_actions, change
+
+        return initial_actions, "nothing"
+
+    def build_sar(
+        self,
+        should_file: bool,
+        reason: str,
+        case_id: str,
+        customer_id: str,
+        card_id: str,
+        affected_txn_ids: List[str],
+        connected_cards: List[str],
+        connected_devices: List[str],
+        exposure_usd: float,
+        activity_dates: List[str],
+        narrative_detail: str,
+    ) -> SAR:
+        """Constructs the official SAR object compliant with FinCEN guidance."""
+        if not should_file:
+            return SAR(
+                file=False,
+                reason=reason or "Exposure under reporting threshold and no multi-party syndicate connection detected.",
+                narrative="",
+                subjects=[],
+                total_amount_usd=0.0,
+                activity_dates=[],
             )
 
-        if 0.40 <= txn.model_risk_score < 0.85 and not (FraudPatternType.DEVICE_IDENTITY_RING in patterns):
-            matches.append(
-                PolicyRuleMatch(
-                    rule_id="POL-102",
-                    rule_name="Controlled Customer Verification",
-                    severity="MEDIUM",
-                    description="Moderate risk transaction requires step-up authentication or SMS confirmation before hard block.",
-                    regulatory_reference="FFIEC Customer Authentication Guidelines",
-                )
-            )
+        subjects = [customer_id, card_id] + connected_cards
+        if connected_devices:
+            subjects.extend(connected_devices[:2])
 
-        if txn.amount >= 5000.0 or evidence.velocity_1h_amount >= 5000.0:
-            matches.append(
-                PolicyRuleMatch(
-                    rule_id="POL-104",
-                    rule_name="Mandatory SAR Threshold Met",
-                    severity="CRITICAL",
-                    description="Aggregate fraud exposure >= $5,000 requires BSA filing.",
-                    regulatory_reference="FinCEN BSA 31 CFR 1020.320",
-                )
-            )
-
-        return matches
-
-    def generate_sar_if_warranted(self, case_id: str, txn: Transaction, evidence: GraphEvidence, patterns: List[FraudPatternType]) -> Tuple[bool, SARReport | None]:
-        """Assesses whether policy requires filing a Suspicious Activity Report (SAR)."""
-        exposure = max(txn.amount, evidence.velocity_1h_amount)
-        sar_required = exposure >= 5000.0 or FraudPatternType.DEVICE_IDENTITY_RING in patterns
-
-        if not sar_required:
-            return False, None
-
-        sar = SARReport(
-            sar_id=f"SAR-{case_id}-{int(txn.amount)}",
-            subject_id=txn.customer_id,
-            narrative=(
-                f"Suspicious activity detected regarding customer {txn.customer_id} on card {txn.card_id}. "
-                f"Transaction {txn.txn_id} for amount ${txn.amount:.2f} demonstrated patterns: "
-                f"{', '.join([p.value for p in patterns])}. TigerGraph analysis uncovered "
-                f"{evidence.shared_device_card_count} connected cards and {evidence.shared_device_customer_count} "
-                f"connected customer entities operating across shared infrastructure."
-            ),
-            suspected_violations=[p.value for p in patterns],
-            total_suspicious_amount=exposure,
-            filing_deadline_days=30,
-            requires_law_enforcement_escalation=exposure >= 25000.0,
+        narrative = (
+            f"During the period {activity_dates[0]} to {activity_dates[-1]}, card {card_id} associated with customer {customer_id} "
+            f"was subjected to unauthorized transaction activity totaling ${exposure_usd:.2f} across {len(affected_txn_ids)} transaction(s). "
+            f"{narrative_detail} "
+            f"The activity was flagged via TigerGraph graph traversal and verified under bank policy rules. "
+            f"Card {card_id} has been blocked and marked for replacement. "
+            f"Connected cards ({', '.join(connected_cards) if connected_cards else 'none'}) were identified and placed under monitoring to mitigate systemic exposure."
         )
-        return True, sar
 
-    def format_graphrag_context(self, txn: Transaction, evidence: GraphEvidence, patterns: List[FraudPatternType], similar_cases: List[Dict[str, Any]]) -> str:
-        """Formats integrated Graph context + Policy text into a grounded prompt context."""
-        context = []
-        context.append(f"=== TARGET TRANSACTION: {txn.txn_id} ===")
-        context.append(f"Amount: ${txn.amount:.2f} | Customer: {txn.customer_id} | Risk Score: {txn.model_risk_score:.2f}")
-        context.append(f"Card: {txn.card_id} | Location: {txn.city}, {txn.country}")
-        context.append("\n=== TIGERGRAPH KNOWLEDGE GRAPH EVIDENCE ===")
-        context.append(f"- Connected cards on same device: {evidence.shared_device_card_count}")
-        context.append(f"- Connected customers on same device: {evidence.shared_device_customer_count}")
-        context.append(f"- Rolling 1-hour velocity: {evidence.velocity_1h_txn_count} txns, total ${evidence.velocity_1h_amount:.2f}")
-        context.append(f"- Impossible travel detected: {evidence.impossible_travel_detected} (Speed: {evidence.travel_speed_kmh or 0} km/h)")
-        context.append(f"- 2-hop Subgraph entities: {evidence.raw_subgraph_nodes} nodes, {evidence.raw_subgraph_edges} edges")
-
-        if similar_cases:
-            context.append("\n=== HISTORICAL CASE MEMORY (PAST 4 MONTHS) ===")
-            for c in similar_cases:
-                context.append(f"- Case {c.get('case_id')}: Typology={c.get('fraud_type')}, Outcome={c.get('outcome')}, Action={c.get('final_action')}")
-
-        context.append("\n=== IDENTIFIED FRAUD TYPOLOGIES ===")
-        for p in patterns:
-            context.append(f"- {p.value}: {self.KNOWN_PATTERNS.get(p, {}).get('description', '')}")
-
-        return "\n".join(context)
+        return SAR(
+            file=True,
+            reason=reason,
+            narrative=narrative,
+            subjects=subjects,
+            total_amount_usd=round(exposure_usd, 2),
+            activity_dates=activity_dates,
+        )

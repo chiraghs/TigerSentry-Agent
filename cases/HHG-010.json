@@ -1,0 +1,116 @@
+{
+  "case_id": "HHG-010",
+  "case": {
+    "status": "closed_fraud",
+    "verdict": "fraud",
+    "fraud_probability": 0.9,
+    "pattern": "card_not_present_new_device",
+    "pattern_description": "",
+    "affected_txn_ids": [
+      "3506725"
+    ],
+    "first_suspicious_txn_id": "3506725",
+    "connected_card_ids": [
+      "17379"
+    ],
+    "connected_device_profiles": [
+      "Windows | Windows 10 | edge 16.0 | 1366x768"
+    ],
+    "exposure_usd": 1000.03,
+    "evidence": [
+      {
+        "claim": "Transaction 3506725 for $1000.03 evaluated on card C10434-K1 with model risk score 0.90.",
+        "source": "graph",
+        "ref": "query:get_entity_subgraph(txn_id=3506725)",
+        "entity_ids": [
+          "3506725",
+          "C10434-K1"
+        ]
+      },
+      {
+        "claim": "Transaction originated from device profile 'Windows | Windows 10 | edge 16.0 | 1366x768' marked New for customer account.",
+        "source": "graph",
+        "ref": "query:device_neighbors(device_id=3506725)",
+        "entity_ids": [
+          "3506725"
+        ]
+      }
+    ],
+    "similar_prior_cases": [
+      "CC-0011",
+      "CC-0018"
+    ],
+    "summary": "Investigation for case HHG-010 confirmed fraud pattern 'card_not_present_new_device' on card C10434-K1. Total exposure of $1000.03 identified across 1 transaction(s). Card blocked and scheduled for re-issuance under Policy R2.",
+    "written_to_graph": true,
+    "graph_case_id": "TG-CASE-HHG-010"
+  },
+  "evidence_requests": [
+    {
+      "type": "customer_validation",
+      "asked_after_step": 3,
+      "assumed_response": "Customer states they did not authorize this purchase and still has possession of the card."
+    }
+  ],
+  "next_best_actions": {
+    "initial": [
+      {
+        "action": "BLOCK_CARD",
+        "route": "L1",
+        "reason": "Strong fraud indicators (prob 0.90)"
+      },
+      {
+        "action": "CREATE_CASE",
+        "route": "auto",
+        "reason": "Section 3a: case creation warranted for high probability fraud"
+      },
+      {
+        "action": "FILE_REPORT",
+        "route": "L2",
+        "reason": "Section 3a: confirmed/strong fraud with exposure > $1,000"
+      }
+    ],
+    "final": [
+      {
+        "action": "BLOCK_CARD",
+        "route": "L1",
+        "reason": "R2: customer denied transaction; exposure $1000.03"
+      },
+      {
+        "action": "CREATE_CASE",
+        "route": "auto",
+        "reason": "R2: case record opened in graph"
+      },
+      {
+        "action": "FILE_REPORT",
+        "route": "L2",
+        "reason": "R2 and Section 3a: customer denied unauthorized use with exposure > $1,000 or shared origin"
+      },
+      {
+        "action": "MONITOR_CONNECTED_CARDS",
+        "route": "auto",
+        "reason": "R6: shared infrastructure links this case to 1 other cards"
+      }
+    ],
+    "what_changed": "Customer denial confirmed fraud (probability raised to 0.90), confirming card block and triggering case creation."
+  },
+  "sar": {
+    "file": true,
+    "reason": "R2: confirmed unauthorized use with exposure > $1,000 or multi-card connection",
+    "narrative": "During the period 2016-12-02 to 2016-12-02, card C10434-K1 associated with customer C10434 was subjected to unauthorized transaction activity totaling $1000.03 across 1 transaction(s). Activity matched fraud typology 'card_not_present_new_device' with model risk score 0.90. TigerGraph GSQL graph neighborhood traversal uncovered multi-card entity links. The activity was flagged via TigerGraph graph traversal and verified under bank policy rules. Card C10434-K1 has been blocked and marked for replacement. Connected cards (17379) were identified and placed under monitoring to mitigate systemic exposure.",
+    "subjects": [
+      "C10434",
+      "C10434-K1",
+      "17379",
+      "Windows | Windows 10 | edge 16.0 | 1366x768"
+    ],
+    "total_amount_usd": 1000.03,
+    "activity_dates": [
+      "2016-12-02",
+      "2016-12-02"
+    ]
+  },
+  "stop_reason": "Defensible action determined based on graph topology and cardholder response.",
+  "tool_calls": 6,
+  "tokens": 5200,
+  "latency_s": 0.85
+}

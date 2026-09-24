@@ -23,15 +23,23 @@
   },
   "investigation_record": {
     "steps_taken": [
-      "[2026-09-21T15:57:10.766562] Step 1: Initiated investigation for txn TXN_BENCH_001 triggered by TriggerType.RISK_SCORE",
-      "[2026-09-21T15:57:10.766602] Step 3: Identified patterns: ['DEVICE_IDENTITY_RING', 'CARD_TESTING_VELOCITY']",
-      "[2026-09-21T15:57:10.766618] Step 4: Risk Score: 0.92, Confidence: 0.90, Uncertainty: 0.10",
-      "[2026-09-21T15:57:10.766624] Step 5: Pre-evidence NBA: BLOCK_CARD via route AUTOMATED",
-      "[2026-09-21T15:57:10.766625] Step 6: High certainty or severe hard-risk threshold met; proceeding directly without delaying for interactive evidence.",
-      "[2026-09-21T15:57:10.766629] Step 7: Post-evidence NBA: BLOCK_CARD via route AUTOMATED",
-      "[2026-09-21T15:57:10.766641] Step 7: Mandatory SAR generated: SAR-CASE_BENCH_01-470"
+      "[2026-09-24T20:29:21.116959] Step 1: Initiated investigation for txn TXN_BENCH_001 triggered by TriggerType.RISK_SCORE",
+      "[2026-09-24T20:29:21.117104] Step 3: Identified patterns: ['DEVICE_IDENTITY_RING', 'CARD_TESTING_VELOCITY']",
+      "[2026-09-24T20:29:21.117152] Step 4: Risk Score: 0.92, Confidence: 0.90, Uncertainty: 0.10",
+      "[2026-09-24T20:29:21.117180] Step 5: Pre-evidence NBA: BLOCK_CARD via route AUTOMATED",
+      "[2026-09-24T20:29:21.117188] Step 6: High certainty or severe hard-risk threshold met; proceeding directly without delaying for interactive evidence.",
+      "[2026-09-24T20:29:21.117199] Step 7: Post-evidence NBA: BLOCK_CARD via route AUTOMATED",
+      "[2026-09-24T20:29:21.117236] Step 7: Mandatory SAR generated: SAR-CASE_BENCH_01-470",
+      "[2026-09-24T20:31:24.053772+00:00] Step 6: Interactive Cardholder Push: Verified Legitimate by Customer -> Post-NBA updated to ALLOW_TRANSACTION",
+      "[2026-09-24T20:31:32.752372+00:00] Step 6: Interactive Cardholder Push: FRAUD CONFIRMED BY CUSTOMER -> Post-NBA escalated to FREEZE_ACCOUNT",
+      "[2026-09-24T20:32:25.785465+00:00] Step 6: Interactive Cardholder Push: Verified Legitimate by Customer -> Post-NBA updated to ALLOW_TRANSACTION",
+      "[2026-09-24T20:32:31.142860+00:00] Step 6: Interactive Cardholder Push: FRAUD CONFIRMED BY CUSTOMER -> Post-NBA escalated to FREEZE_ACCOUNT",
+      "[2026-09-24T20:32:35.040255+00:00] Step 6: Interactive Cardholder Push: Challenge Timed Out (10m) -> Precautionary BLOCK_CARD applied",
+      "[2026-09-24T20:32:39.957872+00:00] Step 6: Interactive Cardholder Push: Verified Legitimate by Customer -> Post-NBA updated to ALLOW_TRANSACTION",
+      "[2026-09-24T20:32:45.845347+00:00] Step 6: Interactive Cardholder Push: FRAUD CONFIRMED BY CUSTOMER -> Post-NBA escalated to FREEZE_ACCOUNT",
+      "[2026-09-24T20:32:52.659977+00:00] Step 6: Interactive Cardholder Push: Challenge Timed Out (10m) -> Precautionary BLOCK_CARD applied"
     ],
-    "created_at": "2026-09-21T15:57:10.766449",
+    "created_at": "2026-09-24T20:29:21.116910",
     "policy_matches": [
       {
         "rule_id": "POL-101",
@@ -86,7 +94,7 @@
     "DEVICE_IDENTITY_RING",
     "CARD_TESTING_VELOCITY"
   ],
-  "uncertainty_level": 0.1,
+  "uncertainty_level": 0.4,
   "nba_pre_evidence": {
     "action": "BLOCK_CARD",
     "approval_route": "AUTOMATED",
@@ -94,14 +102,31 @@
     "rationale": "Critical risk score >= 0.90 and active syndicate ring indicators warrant immediate card block.",
     "policy_citation": "Bank Policy POL-101"
   },
-  "requested_evidence": null,
-  "received_evidence": null,
+  "requested_evidence": {
+    "evidence_type": "CUSTOMER_SMS_VALIDATION",
+    "target_entity": "CUST_RING_01",
+    "request_details": {
+      "amount": 470.0,
+      "merchant": "MERCH_CRYPTO_EXCHANGE",
+      "card_id": "CARD_RING_01"
+    },
+    "sent_at": "2026-09-24T20:31:24.053790"
+  },
+  "received_evidence": {
+    "evidence_type": "CUSTOMER_SMS_VALIDATION",
+    "status": "TIMEOUT",
+    "customer_confirmed_legitimate": null,
+    "mfa_passed": null,
+    "analyst_finding": null,
+    "latency_ms": 3000,
+    "notes": "Verification challenge expired after 10-minute SLA window without cardholder response."
+  },
   "nba_post_evidence": {
     "action": "BLOCK_CARD",
-    "approval_route": "AUTOMATED",
-    "confidence": 0.9,
-    "rationale": "Critical risk score >= 0.90 and active syndicate ring indicators warrant immediate card block.",
-    "policy_citation": "Bank Policy POL-101"
+    "approval_route": "L1_FRAUD_ANALYST",
+    "confidence": 0.8,
+    "rationale": "Customer verification challenge timed out. Precautionary temporary card block applied pending inbound analyst call.",
+    "policy_citation": "Bank Policy POL-101 (Precautionary Hold)"
   },
   "sar_report": {
     "sar_id": "SAR-CASE_BENCH_01-470",

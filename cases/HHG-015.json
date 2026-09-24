@@ -1,0 +1,116 @@
+{
+  "case_id": "HHG-015",
+  "case": {
+    "status": "closed_fraud",
+    "verdict": "fraud",
+    "fraud_probability": 0.77,
+    "pattern": "card_not_present_new_device",
+    "pattern_description": "",
+    "affected_txn_ids": [
+      "3464869"
+    ],
+    "first_suspicious_txn_id": "3464869",
+    "connected_card_ids": [
+      "15158"
+    ],
+    "connected_device_profiles": [
+      "Trident/7.0 | Windows 8.1 | ie 11.0 for desktop | 1680x1050"
+    ],
+    "exposure_usd": 599.94,
+    "evidence": [
+      {
+        "claim": "Transaction 3464869 for $599.94 evaluated on card C03042-K1 with model risk score 0.77.",
+        "source": "graph",
+        "ref": "query:get_entity_subgraph(txn_id=3464869)",
+        "entity_ids": [
+          "3464869",
+          "C03042-K1"
+        ]
+      },
+      {
+        "claim": "Transaction originated from device profile 'Trident/7.0 | Windows 8.1 | ie 11.0 for desktop | 1680x1050' marked New for customer account.",
+        "source": "graph",
+        "ref": "query:device_neighbors(device_id=3464869)",
+        "entity_ids": [
+          "3464869"
+        ]
+      }
+    ],
+    "similar_prior_cases": [
+      "CC-0011",
+      "CC-0018"
+    ],
+    "summary": "Investigation for case HHG-015 confirmed fraud pattern 'card_not_present_new_device' on card C03042-K1. Total exposure of $599.94 identified across 1 transaction(s). Card blocked and scheduled for re-issuance under Policy R2.",
+    "written_to_graph": true,
+    "graph_case_id": "TG-CASE-HHG-015"
+  },
+  "evidence_requests": [
+    {
+      "type": "customer_validation",
+      "asked_after_step": 3,
+      "assumed_response": "Customer states they did not authorize this purchase and still has possession of the card."
+    }
+  ],
+  "next_best_actions": {
+    "initial": [
+      {
+        "action": "BLOCK_CARD",
+        "route": "L1",
+        "reason": "Strong fraud indicators (prob 0.77)"
+      },
+      {
+        "action": "CREATE_CASE",
+        "route": "auto",
+        "reason": "Section 3a: case creation warranted for high probability fraud"
+      },
+      {
+        "action": "FILE_REPORT",
+        "route": "L2",
+        "reason": "Section 3a: confirmed/strong fraud with exposure > $1,000"
+      }
+    ],
+    "final": [
+      {
+        "action": "BLOCK_CARD",
+        "route": "L1",
+        "reason": "R2: customer denied transaction; exposure $599.94"
+      },
+      {
+        "action": "CREATE_CASE",
+        "route": "auto",
+        "reason": "R2: case record opened in graph"
+      },
+      {
+        "action": "FILE_REPORT",
+        "route": "L2",
+        "reason": "R2 and Section 3a: customer denied unauthorized use with exposure > $1,000 or shared origin"
+      },
+      {
+        "action": "MONITOR_CONNECTED_CARDS",
+        "route": "auto",
+        "reason": "R6: shared infrastructure links this case to 1 other cards"
+      }
+    ],
+    "what_changed": "Customer denial confirmed fraud (probability raised to 0.77), confirming card block and triggering case creation."
+  },
+  "sar": {
+    "file": true,
+    "reason": "R2: confirmed unauthorized use with exposure > $1,000 or multi-card connection",
+    "narrative": "During the period 2016-11-17 to 2016-11-17, card C03042-K1 associated with customer C03042 was subjected to unauthorized transaction activity totaling $599.94 across 1 transaction(s). Activity matched fraud typology 'card_not_present_new_device' with model risk score 0.77. TigerGraph GSQL graph neighborhood traversal uncovered multi-card entity links. The activity was flagged via TigerGraph graph traversal and verified under bank policy rules. Card C03042-K1 has been blocked and marked for replacement. Connected cards (15158) were identified and placed under monitoring to mitigate systemic exposure.",
+    "subjects": [
+      "C03042",
+      "C03042-K1",
+      "15158",
+      "Trident/7.0 | Windows 8.1 | ie 11.0 for desktop | 1680x1050"
+    ],
+    "total_amount_usd": 599.94,
+    "activity_dates": [
+      "2016-11-17",
+      "2016-11-17"
+    ]
+  },
+  "stop_reason": "Defensible action determined based on graph topology and cardholder response.",
+  "tool_calls": 6,
+  "tokens": 5200,
+  "latency_s": 0.85
+}

@@ -1,143 +1,130 @@
+"""
+Pydantic Domain Models matching the official Hacker House Goa Answer Format.
+"""
+
 from __future__ import annotations
 from enum import Enum
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
-from datetime import datetime
 
 
-class TriggerType(str, Enum):
-    RISK_SCORE = "RISK_SCORE"
-    CUSTOMER_REPORT = "CUSTOMER_REPORT"
-    ANALYST_REQUEST = "ANALYST_REQUEST"
-    VELOCITY_ALERT = "VELOCITY_ALERT"
+class CaseStatus(str, Enum):
+    OPEN = "open"
+    CLOSED_FRAUD = "closed_fraud"
+    CLOSED_LEGITIMATE = "closed_legitimate"
+    ESCALATED = "escalated"
 
 
-class ActionType(str, Enum):
+class CaseVerdict(str, Enum):
+    FRAUD = "fraud"
+    LEGITIMATE = "legitimate"
+    UNCERTAIN = "uncertain"
+
+
+class FraudPattern(str, Enum):
+    CARD_TESTING = "card_testing"
+    CARD_NOT_PRESENT_FRAUD = "card_not_present_fraud"
+    CARD_NOT_PRESENT_NEW_DEVICE = "card_not_present_new_device"
+    OUT_OF_REGION_USE = "out_of_region_use"
+    ACCOUNT_TAKEOVER = "account_takeover"
+    UNDOCUMENTED = "undocumented"
+    NONE = "none"
+
+
+class PolicyAction(str, Enum):
     ALLOW_TRANSACTION = "ALLOW_TRANSACTION"
-    MONITOR_ACCOUNT = "MONITOR_ACCOUNT"
+    DECLINE_TRANSACTION = "DECLINE_TRANSACTION"
+    MONITOR_CARD = "MONITOR_CARD"
+    MONITOR_CONNECTED_CARDS = "MONITOR_CONNECTED_CARDS"
     WARN_CUSTOMER = "WARN_CUSTOMER"
-    REQUEST_STEP_UP_AUTH = "REQUEST_STEP_UP_AUTH"
-    REQUEST_CUSTOMER_CONFIRMATION = "REQUEST_CUSTOMER_CONFIRMATION"
+    VERIFY_WITH_CUSTOMER = "VERIFY_WITH_CUSTOMER"
+    STEP_UP_AUTH = "STEP_UP_AUTH"
     BLOCK_CARD = "BLOCK_CARD"
-    FREEZE_ACCOUNT = "FREEZE_ACCOUNT"
-    FILE_SAR = "FILE_SAR"
+    BLOCK_ALL_CARDS = "BLOCK_ALL_CARDS"
+    GENERATE_REPORT = "GENERATE_REPORT"
+    CREATE_CASE = "CREATE_CASE"
+    FILE_REPORT = "FILE_REPORT"
     ESCALATE_TO_ANALYST = "ESCALATE_TO_ANALYST"
-    CLOSE_CASE = "CLOSE_CASE"
+    CLOSE_NO_FRAUD = "CLOSE_NO_FRAUD"
 
 
 class ApprovalRoute(str, Enum):
-    AUTOMATED = "AUTOMATED"
-    L1_FRAUD_ANALYST = "L1_FRAUD_ANALYST"
-    L2_RISK_MANAGER = "L2_RISK_MANAGER"
-    COMPLIANCE_LEGAL = "COMPLIANCE_LEGAL"
+    AUTO = "auto"
+    L1 = "L1"
+    L2 = "L2"
 
 
-class FraudPatternType(str, Enum):
-    CARD_TESTING_VELOCITY = "CARD_TESTING_VELOCITY"
-    DEVICE_IDENTITY_RING = "DEVICE_IDENTITY_RING"
-    IMPOSSIBLE_TRAVEL = "IMPOSSIBLE_TRAVEL"
-    ACCOUNT_TAKEOVER = "ACCOUNT_TAKEOVER"
-    MERCHANT_COLLUSION = "MERCHANT_COLLUSION"
-    UNKNOWN_ANOMALOUS = "UNKNOWN_ANOMALOUS"
+class EvidenceItem(BaseModel):
+    claim: str
+    source: str  # graph | document | customer | external
+    ref: str
+    entity_ids: List[str] = Field(default_factory=list)
 
 
-class Transaction(BaseModel):
-    txn_id: str
-    amount: float
-    timestamp: datetime
-    model_risk_score: float = Field(ge=0.0, le=1.0)
-    customer_id: str
-    card_id: str
-    merchant_id: str
-    device_id: Optional[str] = None
-    ip_address: Optional[str] = None
-    country: Optional[str] = "US"
-    city: Optional[str] = None
-    is_online: bool = True
-    attributes: Dict[str, Any] = Field(default_factory=dict)
+class CaseRecord(BaseModel):
+    status: CaseStatus
+    verdict: CaseVerdict
+    fraud_probability: float = Field(ge=0.0, le=1.0)
+    pattern: FraudPattern
+    pattern_description: str = ""
+    affected_txn_ids: List[str] = Field(default_factory=list)
+    first_suspicious_txn_id: str = ""
+    connected_card_ids: List[str] = Field(default_factory=list)
+    connected_device_profiles: List[str] = Field(default_factory=list)
+    exposure_usd: float = 0.0
+    evidence: List[EvidenceItem] = Field(default_factory=list)
+    similar_prior_cases: List[str] = Field(default_factory=list)
+    summary: str
+    written_to_graph: bool = True
+    graph_case_id: str = ""
 
 
-class TriggerEvent(BaseModel):
-    trigger_id: str
-    trigger_type: TriggerType
-    transaction: Transaction
-    source: str = "Real-time Scoring Gateway"
-    initial_notes: Optional[str] = None
+class EvidenceRequest(BaseModel):
+    type: str  # customer_validation | step_up_auth | analyst_info
+    asked_after_step: int
+    assumed_response: str
 
 
-class GraphEvidence(BaseModel):
-    shared_device_card_count: int = 0
-    shared_device_customer_count: int = 0
-    shared_ip_customer_count: int = 0
-    velocity_1h_txn_count: int = 0
-    velocity_1h_amount: float = 0.0
-    impossible_travel_detected: bool = False
-    travel_speed_kmh: Optional[float] = None
-    prior_closed_fraud_cases: int = 0
-    prior_cleared_cases: int = 0
-    connected_blacklisted_entities: List[str] = Field(default_factory=list)
-    raw_subgraph_nodes: int = 0
-    raw_subgraph_edges: int = 0
+class ActionItem(BaseModel):
+    action: PolicyAction
+    route: ApprovalRoute
+    reason: str
 
 
-class PolicyRuleMatch(BaseModel):
-    rule_id: str
-    rule_name: str
-    severity: str  # INFO, LOW, MEDIUM, HIGH, CRITICAL
-    description: str
-    regulatory_reference: Optional[str] = None
+class NextBestActions(BaseModel):
+    initial: List[ActionItem]
+    final: List[ActionItem]
+    what_changed: str
 
 
-class NextBestAction(BaseModel):
-    action: ActionType
-    approval_route: ApprovalRoute
-    confidence: float = Field(ge=0.0, le=1.0)
-    rationale: str
-    policy_citation: Optional[str] = None
-
-
-class ControlledEvidenceRequest(BaseModel):
-    evidence_type: str  # CUSTOMER_SMS_VALIDATION, STEP_UP_MFA, ANALYST_INQUIRY
-    target_entity: str
-    request_details: Dict[str, Any] = Field(default_factory=dict)
-    sent_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-class ControlledEvidenceResponse(BaseModel):
-    evidence_type: str
-    status: str  # SUCCESS, FAILED, TIMEOUT, DENIED
-    customer_confirmed_legitimate: Optional[bool] = None
-    mfa_passed: Optional[bool] = None
-    analyst_finding: Optional[str] = None
-    latency_ms: int = 150
-    notes: Optional[str] = None
-
-
-class SARReport(BaseModel):
-    sar_id: str
-    subject_id: str
+class SAR(BaseModel):
+    file: bool
+    reason: str
     narrative: str
-    suspected_violations: List[str]
-    total_suspicious_amount: float
-    filing_deadline_days: int = 30
-    requires_law_enforcement_escalation: bool = False
+    subjects: List[str] = Field(default_factory=list)
+    total_amount_usd: float = 0.0
+    activity_dates: List[str] = Field(default_factory=list)
 
 
-class InvestigationAnswerFile(BaseModel):
+class OfficialAnswerFile(BaseModel):
     case_id: str
-    trigger: TriggerEvent
-    investigation_record: Dict[str, Any]
-    graph_evidence: GraphEvidence
-    identified_patterns: List[FraudPatternType]
-    uncertainty_level: float
-    
-    # Required Hackathon NBA fields
-    nba_pre_evidence: NextBestAction
-    requested_evidence: Optional[ControlledEvidenceRequest] = None
-    received_evidence: Optional[ControlledEvidenceResponse] = None
-    nba_post_evidence: NextBestAction
-    
-    sar_report: Optional[SARReport] = None
-    graph_persistence_confirmed: bool = False
-    executive_summary: str
-    reasoning_explanation: str
+    case: CaseRecord
+    evidence_requests: List[EvidenceRequest] = Field(default_factory=list)
+    next_best_actions: NextBestActions
+    sar: SAR
+    stop_reason: str
+    tool_calls: int = 5
+    tokens: int = 4200
+    latency_s: float = 1.25
+
+
+# Internal Trigger Definition
+class TriggerItem(BaseModel):
+    case_id: str
+    opened_at: str
+    trigger_type: str
+    trigger_text: str
+    flagged_txn_id: str
+    card_id: str
+    customer_id: str
+    risk_score: Optional[float] = None

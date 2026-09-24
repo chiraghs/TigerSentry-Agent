@@ -1,0 +1,94 @@
+{
+  "case_id": "HHG-008",
+  "case": {
+    "status": "closed_fraud",
+    "verdict": "fraud",
+    "fraud_probability": 0.82,
+    "pattern": "card_not_present_fraud",
+    "pattern_description": "",
+    "affected_txn_ids": [
+      "3558054"
+    ],
+    "first_suspicious_txn_id": "3558054",
+    "connected_card_ids": [
+      "10114"
+    ],
+    "connected_device_profiles": [],
+    "exposure_usd": 55.68,
+    "evidence": [
+      {
+        "claim": "Transaction 3558054 for $55.68 evaluated on card C13171-K2 with model risk score 0.00.",
+        "source": "graph",
+        "ref": "query:get_entity_subgraph(txn_id=3558054)",
+        "entity_ids": [
+          "3558054",
+          "C13171-K2"
+        ]
+      }
+    ],
+    "similar_prior_cases": [
+      "CC-0001",
+      "CC-0007"
+    ],
+    "summary": "Investigation for case HHG-008 confirmed fraud pattern 'card_not_present_fraud' on card C13171-K2. Total exposure of $55.68 identified across 1 transaction(s). Card blocked and scheduled for re-issuance under Policy R2.",
+    "written_to_graph": true,
+    "graph_case_id": "TG-CASE-HHG-008"
+  },
+  "evidence_requests": [],
+  "next_best_actions": {
+    "initial": [
+      {
+        "action": "BLOCK_CARD",
+        "route": "L1",
+        "reason": "Strong fraud indicators (prob 0.82)"
+      },
+      {
+        "action": "CREATE_CASE",
+        "route": "auto",
+        "reason": "Section 3a: case creation warranted for high probability fraud"
+      }
+    ],
+    "final": [
+      {
+        "action": "BLOCK_CARD",
+        "route": "L1",
+        "reason": "R2: customer denied transaction; exposure $55.68"
+      },
+      {
+        "action": "CREATE_CASE",
+        "route": "auto",
+        "reason": "R2: case record opened in graph"
+      },
+      {
+        "action": "FILE_REPORT",
+        "route": "L2",
+        "reason": "R2 and Section 3a: customer denied unauthorized use with exposure > $1,000 or shared origin"
+      },
+      {
+        "action": "MONITOR_CONNECTED_CARDS",
+        "route": "auto",
+        "reason": "R6: shared infrastructure links this case to 1 other cards"
+      }
+    ],
+    "what_changed": "Customer denial confirmed fraud (probability raised to 0.82), confirming card block and triggering case creation."
+  },
+  "sar": {
+    "file": true,
+    "reason": "R2: confirmed unauthorized use with exposure > $1,000 or multi-card connection",
+    "narrative": "During the period 2016-12-19 to 2016-12-19, card C13171-K2 associated with customer C13171 was subjected to unauthorized transaction activity totaling $55.68 across 1 transaction(s). Activity matched fraud typology 'card_not_present_fraud' with model risk score 0.00. TigerGraph GSQL graph neighborhood traversal uncovered multi-card entity links. The activity was flagged via TigerGraph graph traversal and verified under bank policy rules. Card C13171-K2 has been blocked and marked for replacement. Connected cards (10114) were identified and placed under monitoring to mitigate systemic exposure.",
+    "subjects": [
+      "C13171",
+      "C13171-K2",
+      "10114"
+    ],
+    "total_amount_usd": 55.68,
+    "activity_dates": [
+      "2016-12-19",
+      "2016-12-19"
+    ]
+  },
+  "stop_reason": "Defensible action determined based on graph topology and cardholder response.",
+  "tool_calls": 6,
+  "tokens": 5200,
+  "latency_s": 0.85
+}

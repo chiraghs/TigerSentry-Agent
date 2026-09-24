@@ -10,3 +10,8 @@ outputs/cases/*.json
 !outputs/cases/CASE_BENCH_01.json
 !outputs/cases/CASE_BENCH_09.json
 !outputs/cases/benchmark_summary.json
+data/**/*.csv
+data/**/*.json
+!data/sample/case_pack.csv
+!data/sample/README-2.md
+

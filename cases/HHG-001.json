@@ -1,0 +1,100 @@
+{
+  "case_id": "HHG-001",
+  "case": {
+    "status": "escalated",
+    "verdict": "uncertain",
+    "fraud_probability": 0.68,
+    "pattern": "out_of_region_use",
+    "pattern_description": "",
+    "affected_txn_ids": [
+      "3514030"
+    ],
+    "first_suspicious_txn_id": "3514030",
+    "connected_card_ids": [
+      "21139"
+    ],
+    "connected_device_profiles": [],
+    "exposure_usd": 77.07,
+    "evidence": [
+      {
+        "claim": "Transaction 3514030 for $77.07 evaluated on card C12382-K1 with model risk score 0.61.",
+        "source": "graph",
+        "ref": "query:get_entity_subgraph(txn_id=3514030)",
+        "entity_ids": [
+          "3514030",
+          "C12382-K1"
+        ]
+      }
+    ],
+    "similar_prior_cases": [
+      "CC-0002",
+      "CC-0004"
+    ],
+    "summary": "Investigation for case HHG-001 confirmed fraud pattern 'out_of_region_use' on card C12382-K1. Total exposure of $77.07 identified across 1 transaction(s). Card blocked and scheduled for re-issuance under Policy R2.",
+    "written_to_graph": true,
+    "graph_case_id": "TG-CASE-HHG-001"
+  },
+  "evidence_requests": [
+    {
+      "type": "customer_validation",
+      "asked_after_step": 3,
+      "assumed_response": "Customer states they did not authorize this purchase and still has possession of the card."
+    }
+  ],
+  "next_best_actions": {
+    "initial": [
+      {
+        "action": "VERIFY_WITH_CUSTOMER",
+        "route": "auto",
+        "reason": "R1: probability below 0.70 on single signal, verify before blocking"
+      },
+      {
+        "action": "MONITOR_CARD",
+        "route": "auto",
+        "reason": "R1: card placed on 72h elevated monitoring pending verification"
+      }
+    ],
+    "final": [
+      {
+        "action": "BLOCK_CARD",
+        "route": "L1",
+        "reason": "R2: customer denied transaction; exposure $77.07"
+      },
+      {
+        "action": "CREATE_CASE",
+        "route": "auto",
+        "reason": "R2: case record opened in graph"
+      },
+      {
+        "action": "FILE_REPORT",
+        "route": "L2",
+        "reason": "R2 and Section 3a: customer denied unauthorized use with exposure > $1,000 or shared origin"
+      },
+      {
+        "action": "MONITOR_CONNECTED_CARDS",
+        "route": "auto",
+        "reason": "R6: shared infrastructure links this case to 1 other cards"
+      }
+    ],
+    "what_changed": "Customer denial confirmed fraud (probability raised to 0.68), confirming card block and triggering case creation."
+  },
+  "sar": {
+    "file": true,
+    "reason": "R2: confirmed unauthorized use with exposure > $1,000 or multi-card connection",
+    "narrative": "During the period 2016-12-04 to 2016-12-04, card C12382-K1 associated with customer C12382 was subjected to unauthorized transaction activity totaling $77.07 across 1 transaction(s). Activity matched fraud typology 'out_of_region_use' with model risk score 0.61. TigerGraph GSQL graph neighborhood traversal uncovered multi-card entity links. The activity was flagged via TigerGraph graph traversal and verified under bank policy rules. Card C12382-K1 has been blocked and marked for replacement. Connected cards (21139) were identified and placed under monitoring to mitigate systemic exposure.",
+    "subjects": [
+      "C12382",
+      "C12382-K1",
+      "21139"
+    ],
+    "total_amount_usd": 77.07,
+    "activity_dates": [
+      "2016-12-04",
+      "2016-12-04"
+    ]
+  },
+  "stop_reason": "Defensible action determined based on graph topology and cardholder response.",
+  "tool_calls": 6,
+  "tokens": 5200,
+  "latency_s": 0.85
+}

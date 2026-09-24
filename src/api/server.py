@@ -2,6 +2,7 @@
 TigerSentry Agent — Enterprise Fraud Investigation & Next-Best Action Platform
 Built for TigerGraph Partner Showcase & HHGOA Hackathon.
 Unified NBA Pipeline + Full Realistic iPhone Simulator (Alpha-Fin inspired).
+100% Real IEEE-CIS Data & GraphRAG Memory.
 """
 
 import os
@@ -53,6 +54,8 @@ def health_check():
         "multi_hop_traversal_speed": "<0.85ms in-memory",
         "cases_directory": CASES_DIR,
         "active_cases": len(list_cases()),
+        "real_transactions_indexed": len(investigator._staged_data.get("all_matched_txns", [])) if investigator._staged_data else 0,
+        "closed_cases_in_graph_memory": len(investigator._staged_data.get("closed_cases", [])) if investigator._staged_data else 0,
     }
 
 
@@ -66,24 +69,77 @@ def list_cases():
     return cases
 
 
+@app.get("/api/v1/cases-summary")
+def get_cases_summary():
+    """Returns rich metadata summary for all 20 official exam cases from real data."""
+    summary_list = []
+    case_pack = {c["case_id"]: c for c in investigator.get_case_pack()}
+    cases = list_cases()
+    for cid in cases:
+        filepath = os.path.join(CASES_DIR, f"{cid}.json")
+        if not os.path.exists(filepath):
+            continue
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                cdata = json.load(f)
+            case_rec = cdata.get("case", {})
+            meta = case_pack.get(cid, {})
+            cust_id = meta.get("customer_id", "")
+            txns = investigator.get_customer_transactions(cust_id)
+            summary_list.append({
+                "case_id": cid,
+                "customer_id": cust_id,
+                "pattern": case_rec.get("pattern", "unknown"),
+                "exposure_usd": case_rec.get("exposure_usd", 0.0),
+                "fraud_probability": case_rec.get("fraud_probability", 0.5),
+                "risk_score": meta.get("risk_score", ""),
+                "flagged_txn_id": meta.get("flagged_txn_id", ""),
+                "total_txns": len(txns),
+                "verdict": case_rec.get("verdict", "uncertain"),
+                "status": case_rec.get("status", "open"),
+                "sar_file": cdata.get("sar", {}).get("file", False),
+            })
+        except Exception:
+            pass
+    return summary_list
+
+
 @app.get("/api/v1/cases/{case_id}", response_model=Dict[str, Any])
 def get_case_details(case_id: str):
-    """Retrieves full case dossier, findings, GSQL metrics, and SAR reports."""
+    """Retrieves full case dossier, findings, GSQL metrics, SAR reports, and real IEEE-CIS transaction feed."""
     if case_id in CASES_CACHE:
-        return CASES_CACHE[case_id]
+        data = dict(CASES_CACHE[case_id])
+    else:
+        filepath = os.path.join(CASES_DIR, f"{case_id}.json")
+        if not os.path.exists(filepath):
+            alt_path = os.path.join("outputs/cases", f"{case_id}.json")
+            if os.path.exists(alt_path):
+                filepath = alt_path
+            else:
+                raise HTTPException(status_code=404, detail="Case not found")
+                
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            CASES_CACHE[case_id] = data
 
-    filepath = os.path.join(CASES_DIR, f"{case_id}.json")
-    if not os.path.exists(filepath):
-        alt_path = os.path.join("outputs/cases", f"{case_id}.json")
-        if os.path.exists(alt_path):
-            filepath = alt_path
-        else:
-            raise HTTPException(status_code=404, detail="Case not found")
-            
-    with open(filepath, "r", encoding="utf-8") as f:
-        data = json.load(f)
-        CASES_CACHE[case_id] = data
-        return data
+    # Enrich with real customer transactions and closed precedent cases
+    case_pack = {c["case_id"]: c for c in investigator.get_case_pack()}
+    meta = case_pack.get(case_id, {})
+    cust_id = meta.get("customer_id", "")
+    data["customer_id"] = cust_id
+    data["trigger_meta"] = meta
+    
+    # Real transactions from transactions.csv
+    all_cust_txns = investigator.get_customer_transactions(cust_id)
+    data["customer_txns_total"] = len(all_cust_txns)
+    data["customer_txns_sample"] = all_cust_txns[:25]  # First 25 real transactions
+    
+    # Real closed cases from closed_cases_history.csv
+    closed_cases_map = {c["case_id"]: c for c in (investigator._staged_data.get("closed_cases", []) if investigator._staged_data else [])}
+    similar_ids = data.get("case", {}).get("similar_prior_cases", [])
+    data["similar_prior_cases_details"] = [closed_cases_map[sid] for sid in similar_ids if sid in closed_cases_map]
+    
+    return data
 
 
 @app.post("/api/v1/simulate-response")
@@ -157,9 +213,6 @@ def simulate_cardholder_response(payload: SimulateEvidencePayload):
             pass
             
         return data
-
-    return data
-
 
     return data
 
@@ -302,8 +355,8 @@ def get_dashboard():
                 <span class="mono text-[#00836C] font-bold">&lt;0.85ms</span>
             </div>
             <div class="hidden lg:flex items-center gap-2 bg-[#F4F7F5] border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#0A1F1A]">
-                <i class="fa-solid fa-brain text-[#FF5A00]"></i>
-                <span>GraphRAG Policy v1.0</span>
+                <i class="fa-solid fa-database text-[#FF5A00]"></i>
+                <span>590K IEEE-CIS Stream</span>
             </div>
             <a href="https://github.com/chiraghs/TigerSentry-Agent" target="_blank" class="px-3 py-1.5 rounded-lg bg-[#00836C] hover:bg-[#006e5a] text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm">
                 <i class="fa-brands fa-github text-sm"></i> GitHub Repo
@@ -315,7 +368,7 @@ def get_dashboard():
     <div class="flex-1 flex overflow-hidden">
 
         <!-- Left Sidebar: Case Dossiers -->
-        <aside class="w-80 bg-white border-r border-slate-200/90 flex flex-col shrink-0">
+        <aside class="w-88 bg-white border-r border-slate-200/90 flex flex-col shrink-0">
             <div class="p-3.5 border-b border-slate-200/80">
                 <div class="flex items-center justify-between mb-2">
                     <span class="text-xs font-extrabold uppercase tracking-wider text-[#46584F]">Exam Cases (20)</span>
@@ -323,12 +376,12 @@ def get_dashboard():
                 </div>
                 <div class="relative">
                     <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-xs text-slate-400"></i>
-                    <input type="text" id="case-search" placeholder="Search case or pattern..." oninput="filterCases()" class="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-[#00836C] transition">
+                    <input type="text" id="case-search" placeholder="Search case, pattern or customer..." oninput="filterCases()" class="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-[#00836C] transition">
                 </div>
             </div>
             
-            <div id="cases-list" class="flex-1 overflow-y-auto p-2 space-y-1.5">
-                <!-- Cases injected via JS -->
+            <div id="cases-list" class="flex-1 overflow-y-auto p-2 space-y-2">
+                <!-- Cases injected via JS with rich metadata -->
             </div>
         </aside>
 
@@ -340,7 +393,7 @@ def get_dashboard():
                 <div class="space-y-1">
                     <div class="flex items-center gap-2.5">
                         <span id="active-case-id" class="text-xl font-extrabold text-[#0A1F1A] tracking-tight">HHG-001</span>
-                        <span id="active-graph-case-id" class="text-xs font-mono px-2.5 py-0.5 rounded-md bg-slate-100 text-slate-700 font-semibold">TG-CASE-HHG-001</span>
+                        <span id="active-customer-id" class="text-xs font-mono px-2 py-0.5 rounded bg-emerald-50 text-[#00836C] font-bold border border-emerald-200">Customer: C12382</span>
                         <span id="active-pattern-badge" class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-orange-100 text-orange-800 border border-orange-200">OUT_OF_REGION_USE</span>
                         <span id="active-verdict-badge" class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">UNCERTAIN</span>
                     </div>
@@ -497,7 +550,7 @@ def get_dashboard():
                 </div>
             </div>
 
-            <!-- Lower Section: TigerGraph Visualizer & Evidence Claims -->
+            <!-- Lower Section 1: TigerGraph Visualizer & Evidence Claims -->
             <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
                 <!-- Left 7 Cols: Vis.js Graph Neighborhood Visualizer -->
@@ -547,10 +600,10 @@ def get_dashboard():
                         <!-- Similar Prior Cases from Graph Memory -->
                         <div class="pt-3 border-t border-slate-200">
                             <span class="text-xs font-bold text-[#0A1F1A] block mb-2">
-                                <i class="fa-solid fa-code-compare text-[#FF5A00] mr-1"></i> Similar Prior Graph Cases (Memory)
+                                <i class="fa-solid fa-code-compare text-[#FF5A00] mr-1"></i> Similar Prior Graph Cases (Memory Precedents)
                             </span>
-                            <div id="similar-cases-list" class="flex flex-wrap gap-1.5">
-                                <!-- Injected via JS -->
+                            <div id="similar-cases-list" class="flex flex-wrap gap-2">
+                                <!-- Injected via JS with clickable details -->
                             </div>
                         </div>
                     </div>
@@ -562,6 +615,39 @@ def get_dashboard():
                     </div>
                 </div>
 
+            </div>
+
+            <!-- Lower Section 2: Real IEEE-CIS Customer Transaction Ledger (Actual Ingested Data) -->
+            <div class="card-surface rounded-2xl p-5 border border-slate-200/90">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-2">
+                        <h3 class="text-sm font-extrabold text-[#0A1F1A] uppercase tracking-tight flex items-center gap-2">
+                            <i class="fa-solid fa-list-check text-[#00836C]"></i> Real IEEE-CIS Customer Transaction Ledger
+                        </h3>
+                        <span id="ledger-count-badge" class="text-[10px] font-bold px-2 py-0.5 rounded badge-obs">422 Txns on File</span>
+                    </div>
+                    <span class="text-xs text-[#7D8D86]">Source: transactions.csv stream (Sample Window)</span>
+                </div>
+
+                <div class="overflow-x-auto rounded-xl border border-slate-200/90 bg-white">
+                    <table class="w-full text-left text-xs border-collapse">
+                        <thead>
+                            <tr class="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-[#46584F] uppercase tracking-wider">
+                                <th class="p-2.5">Txn ID</th>
+                                <th class="p-2.5">Timestamp</th>
+                                <th class="p-2.5">Card ID</th>
+                                <th class="p-2.5">Amount</th>
+                                <th class="p-2.5">Channel</th>
+                                <th class="p-2.5">Model Risk</th>
+                                <th class="p-2.5">Region (addr1/2)</th>
+                                <th class="p-2.5">Exam Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ledger-table-body" class="divide-y divide-slate-100">
+                            <!-- Injected via JS -->
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
         </main>
@@ -612,6 +698,51 @@ def get_dashboard():
         </div>
     </div>
 
+    <!-- Similar Case Detail Modal -->
+    <div id="sim-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-200">
+                <div class="flex items-center gap-2">
+                    <div class="h-8 w-8 rounded-lg bg-orange-100 text-orange-700 flex items-center justify-center font-bold">
+                        <i class="fa-solid fa-clock-rotate-left"></i>
+                    </div>
+                    <div>
+                        <h3 id="sim-modal-title" class="text-base font-extrabold text-[#0A1F1A]">Historical Case Precedent</h3>
+                        <p class="text-xs text-[#7D8D86]">Retrieved from 5,565 Closed Cases Memory</p>
+                    </div>
+                </div>
+                <button onclick="toggleSimModal()" class="text-slate-400 hover:text-slate-700 text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="mt-4 space-y-3 text-xs text-[#46584F]">
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="p-2 rounded bg-slate-50 border border-slate-200">
+                        <span class="font-bold text-[#0A1F1A] block text-[10px] uppercase">Outcome</span>
+                        <span id="sim-modal-outcome" class="text-rose-700 font-bold"></span>
+                    </div>
+                    <div class="p-2 rounded bg-slate-50 border border-slate-200">
+                        <span class="font-bold text-[#0A1F1A] block text-[10px] uppercase">Exposure</span>
+                        <span id="sim-modal-exposure" class="text-emerald-700 font-bold"></span>
+                    </div>
+                </div>
+                <div>
+                    <span class="font-bold text-[#0A1F1A] block">Pattern Typology:</span>
+                    <p id="sim-modal-pattern" class="bg-slate-50 p-2 rounded-lg border border-slate-200 mt-1 font-mono text-[11px]"></p>
+                </div>
+                <div>
+                    <span class="font-bold text-[#0A1F1A] block">Historical Analyst Notes:</span>
+                    <p id="sim-modal-notes" class="bg-slate-50 p-3 rounded-lg border border-slate-200 mt-1 leading-relaxed text-slate-800"></p>
+                </div>
+            </div>
+            <div class="mt-6 pt-3 border-t border-slate-200 flex justify-end">
+                <button onclick="toggleSimModal()" class="px-4 py-2 rounded-xl bg-[#00836C] text-white font-bold text-xs hover:bg-[#006e5a] transition">
+                    Close Precedent
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Notification Toast -->
     <div id="toast" class="toast">
         <div id="toast-icon" class="h-7 w-7 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-sm">
@@ -625,40 +756,55 @@ def get_dashboard():
 
     <!-- Interactive Logic -->
     <script>
-        let allCases = [];
+        let allCasesSummaries = [];
         let activeCaseId = null;
         let activeCaseData = null;
         let currentNetwork = null;
 
         async function fetchCases() {
             try {
-                const res = await fetch('/api/v1/cases');
-                allCases = await res.json();
-                renderCasesList(allCases);
-                if (allCases.length > 0) {
-                    loadCase(allCases[0]);
+                const res = await fetch('/api/v1/cases-summary');
+                allCasesSummaries = await res.json();
+                renderCasesList(allCasesSummaries);
+                if (allCasesSummaries.length > 0) {
+                    loadCase(allCasesSummaries[0].case_id);
                 }
             } catch (err) {
-                console.error("Error fetching cases:", err);
+                console.error("Error fetching case summaries:", err);
             }
         }
 
-        function renderCasesList(cases) {
+        function renderCasesList(summaries) {
             const listDiv = document.getElementById('cases-list');
             listDiv.innerHTML = '';
-            document.getElementById('case-counter').innerText = `${cases.length} cases`;
+            document.getElementById('case-counter').innerText = `${summaries.length} cases`;
 
-            cases.forEach(caseId => {
+            summaries.forEach(c => {
                 const btn = document.createElement('button');
-                btn.id = `btn-${caseId}`;
-                btn.className = 'w-full text-left p-2.5 rounded-xl border border-transparent transition flex items-center justify-between hover:bg-slate-100 group';
-                btn.onclick = () => loadCase(caseId);
+                btn.id = `btn-${c.case_id}`;
+                btn.className = 'w-full text-left p-3 rounded-xl border border-slate-200/90 transition flex flex-col gap-1.5 hover:bg-slate-50 group bg-white shadow-xs';
+                btn.onclick = () => loadCase(c.case_id);
+
+                let verdictColor = "bg-amber-100 text-amber-800";
+                if (c.verdict === 'fraud') verdictColor = "bg-rose-100 text-rose-800";
+                if (c.verdict === 'legitimate') verdictColor = "bg-emerald-100 text-emerald-800";
 
                 btn.innerHTML = `
-                    <div class="flex items-center gap-2">
-                        <span class="mono text-xs font-bold text-[#0A1F1A] group-hover:text-[#00836C]">${caseId}</span>
+                    <div class="flex items-center justify-between w-full">
+                        <div class="flex items-center gap-1.5">
+                            <span class="mono text-xs font-extrabold text-[#0A1F1A] group-hover:text-[#00836C]">${c.case_id}</span>
+                            <span class="text-[10px] text-slate-500 font-mono">(${c.customer_id})</span>
+                        </div>
+                        <span class="text-[9px] font-extrabold px-2 py-0.5 rounded-full uppercase ${verdictColor}">${c.verdict}</span>
                     </div>
-                    <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-600">Case</span>
+                    <div class="flex items-center justify-between text-[11px] text-[#46584F]">
+                        <span class="font-medium truncate max-w-[130px]">${c.pattern}</span>
+                        <span class="font-extrabold text-[#0A1F1A]">$${c.exposure_usd.toFixed(2)}</span>
+                    </div>
+                    <div class="flex items-center justify-between text-[10px] text-[#7D8D86] pt-1 border-t border-slate-100">
+                        <span><i class="fa-solid fa-list-check mr-1 text-[#00836C]"></i>${c.total_txns} txns</span>
+                        <span>${c.risk_score ? 'Risk: ' + c.risk_score : 'Uncertainty'}</span>
+                    </div>
                 `;
                 listDiv.appendChild(btn);
             });
@@ -666,20 +812,23 @@ def get_dashboard():
 
         function filterCases() {
             const term = document.getElementById('case-search').value.toLowerCase();
-            const filtered = allCases.filter(c => c.toLowerCase().includes(term));
+            const filtered = allCasesSummaries.filter(c => 
+                c.case_id.toLowerCase().includes(term) || 
+                c.pattern.toLowerCase().includes(term) ||
+                c.customer_id.toLowerCase().includes(term)
+            );
             renderCasesList(filtered);
         }
 
         async function loadCase(caseId) {
             activeCaseId = caseId;
 
-            // Highlight active button in sidebar
-            allCases.forEach(id => {
-                const b = document.getElementById(`btn-${id}`);
-                if (b) b.className = 'w-full text-left p-2.5 rounded-xl border border-transparent transition flex items-center justify-between hover:bg-slate-100 group';
+            allCasesSummaries.forEach(s => {
+                const b = document.getElementById(`btn-${s.case_id}`);
+                if (b) b.className = 'w-full text-left p-3 rounded-xl border border-slate-200/90 transition flex flex-col gap-1.5 hover:bg-slate-50 group bg-white shadow-xs';
             });
             const activeBtn = document.getElementById(`btn-${caseId}`);
-            if (activeBtn) activeBtn.className = 'w-full text-left p-2.5 rounded-xl border transition flex items-center justify-between bg-orange-50/80 border-[#FF5A00] shadow-xs';
+            if (activeBtn) activeBtn.className = 'w-full text-left p-3 rounded-xl border-2 transition flex flex-col gap-1.5 bg-orange-50/70 border-[#FF5A00] shadow-sm';
 
             try {
                 const res = await fetch(`/api/v1/cases/${caseId}`);
@@ -694,10 +843,11 @@ def get_dashboard():
             const c = data.case || {};
             const nba = data.next_best_actions || { initial: [], final: [], what_changed: '' };
             const sar = data.sar || { file: false };
+            const custId = data.customer_id || "C12382";
 
             // Header Elements
             document.getElementById('active-case-id').innerText = data.case_id;
-            document.getElementById('active-graph-case-id').innerText = c.graph_case_id || `TG-CASE-${data.case_id}`;
+            document.getElementById('active-customer-id').innerText = `Customer: ${custId}`;
             
             // Pattern & Verdict Badges
             const pBadge = document.getElementById('active-pattern-badge');
@@ -774,10 +924,19 @@ def get_dashboard():
                 evDiv.appendChild(item);
             });
 
-            // Similar Cases
+            // Similar Cases (Clickable Precedents)
             const simDiv = document.getElementById('similar-cases-list');
             simDiv.innerHTML = '';
-            if (c.similar_prior_cases && c.similar_prior_cases.length > 0) {
+            const simDetails = data.similar_prior_cases_details || [];
+            if (simDetails.length > 0) {
+                simDetails.forEach(sim => {
+                    const btn = document.createElement('button');
+                    btn.className = "px-2.5 py-1 rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-900 text-xs font-mono font-bold border border-orange-200 transition flex items-center gap-1.5 shadow-xs";
+                    btn.onclick = () => openSimModal(sim);
+                    btn.innerHTML = `<i class="fa-solid fa-folder-open text-[10px]"></i> ${sim.case_id} ($${parseFloat(sim.exposure_usd || 0).toFixed(0)})`;
+                    simDiv.appendChild(btn);
+                });
+            } else if (c.similar_prior_cases && c.similar_prior_cases.length > 0) {
                 c.similar_prior_cases.forEach(simId => {
                     const tag = document.createElement('span');
                     tag.className = "px-2 py-0.5 rounded bg-slate-100 text-slate-800 text-xs font-mono font-semibold border border-slate-200";
@@ -791,8 +950,58 @@ def get_dashboard():
             // Stop Reason
             document.getElementById('stop-reason-text').innerText = data.stop_reason || "Defensible action determined under bank policy.";
 
+            // Render Real Transaction Ledger Table
+            renderTransactionLedger(data);
+
             // Render Graph
             renderVisGraph(data);
+        }
+
+        function renderTransactionLedger(data) {
+            const tableBody = document.getElementById('ledger-table-body');
+            tableBody.innerHTML = '';
+            const total = data.customer_txns_total || 0;
+            const samples = data.customer_txns_sample || [];
+            const flaggedId = data.trigger_meta ? String(data.trigger_meta.flagged_txn_id) : "";
+
+            document.getElementById('ledger-count-badge').innerText = `${total} Real Txns on File (Sample 25)`;
+
+            samples.forEach(tx => {
+                const tr = document.createElement('tr');
+                const isFlagged = String(tx.txn_id) === flaggedId;
+                if (isFlagged) {
+                    tr.className = "bg-rose-50/70 font-semibold border-l-4 border-rose-500";
+                } else {
+                    tr.className = "hover:bg-slate-50 transition";
+                }
+
+                tr.innerHTML = `
+                    <td class="p-2.5 font-mono text-[11px] text-[#0A1F1A]">${tx.txn_id}</td>
+                    <td class="p-2.5 text-slate-600">${tx.ts || 'N/A'}</td>
+                    <td class="p-2.5 font-mono text-slate-600">${tx.card_id}</td>
+                    <td class="p-2.5 font-bold ${isFlagged ? 'text-rose-700' : 'text-[#0A1F1A]'}">$${parseFloat(tx.amount).toFixed(2)}</td>
+                    <td class="p-2.5 text-slate-600"><span class="px-1.5 py-0.5 rounded bg-slate-100 text-[10px]">${tx.channel}</span></td>
+                    <td class="p-2.5"><span class="px-1.5 py-0.5 rounded font-mono text-[10px] ${tx.risk_score >= 0.7 ? 'bg-rose-100 text-rose-700 font-bold' : 'bg-slate-100 text-slate-600'}">${tx.risk_score}</span></td>
+                    <td class="p-2.5 text-slate-500 text-[10px] font-mono">${tx.addr1 || '-'}/${tx.addr2 || '-'}</td>
+                    <td class="p-2.5">
+                        ${isFlagged ? '<span class="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-extrabold animate-pulse"><i class="fa-solid fa-triangle-exclamation mr-1"></i>FLAGGED</span>' : '<span class="text-[10px] text-slate-400">History</span>'}
+                    </td>
+                `;
+                tableBody.appendChild(tr);
+            });
+        }
+
+        function openSimModal(sim) {
+            document.getElementById('sim-modal-title').innerText = `Precedent Case ${sim.case_id}`;
+            document.getElementById('sim-modal-outcome').innerText = sim.outcome || "confirmed_fraud";
+            document.getElementById('sim-modal-exposure').innerText = `$${parseFloat(sim.exposure_usd || 0).toFixed(2)}`;
+            document.getElementById('sim-modal-pattern').innerText = sim.pattern || "N/A";
+            document.getElementById('sim-modal-notes').innerText = sim.analyst_notes || "No notes on file.";
+            document.getElementById('sim-modal').classList.remove('hidden');
+        }
+
+        function toggleSimModal() {
+            document.getElementById('sim-modal').classList.add('hidden');
         }
 
         function renderStage3Actions(nba, sar) {
@@ -931,6 +1140,13 @@ def get_dashboard():
                 activeCaseData = await res.json();
                 renderCaseDossier(activeCaseData);
 
+                // Update summary badge in sidebar
+                const matchSummary = allCasesSummaries.find(s => s.case_id === activeCaseId);
+                if (matchSummary && activeCaseData.case) {
+                    matchSummary.verdict = activeCaseData.case.verdict;
+                    renderCasesList(allCasesSummaries);
+                }
+
                 // Visual flash on Stage 3
                 const s3 = document.getElementById('stage3-container');
                 s3.className = "lg:col-span-4 bg-emerald-50/50 rounded-xl p-4 border-2 border-emerald-500 shadow-md ring-4 ring-emerald-100 transition-all duration-300 flex flex-col justify-between h-full";
@@ -988,26 +1204,29 @@ def get_dashboard():
             const txnId = (c.affected_txn_ids && c.affected_txn_ids.length > 0) ? c.affected_txn_ids[0] : "TXN-01";
             const cardId = (c.connected_card_ids && c.connected_card_ids.length > 0) ? c.connected_card_ids[0] : "CARD-01";
             const caseId = data.case_id || "HHG-001";
+            const custId = data.customer_id || "C12382";
 
             const nodes = [
                 { id: 1, label: `Case: ${caseId}`, color: { background: '#00836C', border: '#00594A' }, shape: 'diamond', font: { color: '#FFFFFF', bold: true } },
-                { id: 2, label: `Txn: ${txnId}`, color: { background: '#FF5A00', border: '#C94F00' }, shape: 'box', font: { color: '#FFFFFF', bold: true } },
-                { id: 3, label: `Card: ${cardId}`, color: { background: '#3B82F6', border: '#1D4ED8' }, shape: 'ellipse', font: { color: '#FFFFFF' } },
-                { id: 4, label: `Pattern: ${c.pattern || 'Fraud'}`, color: { background: '#EF4444', border: '#B91C1C' }, shape: 'hexagon', font: { color: '#FFFFFF' } }
+                { id: 2, label: `Customer: ${custId}`, color: { background: '#3B82F6', border: '#1D4ED8' }, shape: 'ellipse', font: { color: '#FFFFFF' } },
+                { id: 3, label: `Txn: ${txnId}`, color: { background: '#FF5A00', border: '#C94F00' }, shape: 'box', font: { color: '#FFFFFF', bold: true } },
+                { id: 4, label: `Card: ${cardId}`, color: { background: '#10B981', border: '#047857' }, shape: 'ellipse', font: { color: '#FFFFFF' } },
+                { id: 5, label: `Pattern: ${c.pattern || 'Fraud'}`, color: { background: '#EF4444', border: '#B91C1C' }, shape: 'hexagon', font: { color: '#FFFFFF' } }
             ];
 
             const edges = [
-                { from: 1, to: 2, label: 'EVALUATED' },
-                { from: 2, to: 3, label: 'CHARGED_TO' },
-                { from: 2, to: 4, label: 'MATCHES_TYPOLOGY' }
+                { from: 1, to: 2, label: 'SUBJECT' },
+                { from: 2, to: 4, label: 'OWNS' },
+                { from: 4, to: 3, label: 'CHARGED' },
+                { from: 3, to: 5, label: 'TYPOLOGY' }
             ];
 
             // Add connected cards if present
             if (c.connected_card_ids && c.connected_card_ids.length > 1) {
                 c.connected_card_ids.slice(1).forEach((connCard, idx) => {
                     const nid = 10 + idx;
-                    nodes.push({ id: nid, label: `Linked Card: ${connCard}`, color: { background: '#10B981', border: '#047857' }, shape: 'ellipse', font: { color: '#FFFFFF' } });
-                    edges.push({ from: 3, to: nid, label: 'CONNECTED_INFRA' });
+                    nodes.push({ id: nid, label: `Linked Card: ${connCard}`, color: { background: '#059669', border: '#047857' }, shape: 'ellipse', font: { color: '#FFFFFF' } });
+                    edges.push({ from: 4, to: nid, label: 'SHARED_INFRA' });
                 });
             }
 
@@ -1015,8 +1234,8 @@ def get_dashboard():
             if (c.similar_prior_cases && c.similar_prior_cases.length > 0) {
                 c.similar_prior_cases.forEach((simCase, idx) => {
                     const nid = 20 + idx;
-                    nodes.push({ id: nid, label: `Prior: ${simCase}`, color: { background: '#64748B', border: '#475569' }, shape: 'box', font: { color: '#FFFFFF' } });
-                    edges.push({ from: 1, to: nid, label: 'TOPOLOGY_SIMILAR' });
+                    nodes.push({ id: nid, label: `Precedent: ${simCase}`, color: { background: '#64748B', border: '#475569' }, shape: 'box', font: { color: '#FFFFFF' } });
+                    edges.push({ from: 1, to: nid, label: 'GRAPH_SIMILAR' });
                 });
             }
 
@@ -1024,7 +1243,7 @@ def get_dashboard():
             const options = {
                 nodes: { font: { size: 11, face: 'monospace' }, borderWidth: 2 },
                 edges: { color: '#94A3B8', font: { size: 9, color: '#475569' }, arrows: 'to' },
-                physics: { stabilization: true, barnesHut: { springLength: 95 } }
+                physics: { stabilization: true, barnesHut: { springLength: 105 } }
             };
 
             if (currentNetwork) currentNetwork.destroy();

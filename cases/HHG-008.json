@@ -1,9 +1,9 @@
 {
   "case_id": "HHG-008",
   "case": {
-    "status": "closed_fraud",
-    "verdict": "fraud",
-    "fraud_probability": 0.82,
+    "status": "closed_legitimate",
+    "verdict": "legitimate",
+    "fraud_probability": 0.04,
     "pattern": "card_not_present_fraud",
     "pattern_description": "",
     "affected_txn_ids": [
@@ -50,31 +50,21 @@
     ],
     "final": [
       {
-        "action": "BLOCK_CARD",
-        "route": "L1",
-        "reason": "R2: customer denied transaction; exposure $55.68"
-      },
-      {
-        "action": "CREATE_CASE",
+        "action": "CLOSE_NO_FRAUD",
         "route": "auto",
-        "reason": "R2: case record opened in graph"
+        "reason": "R3: customer confirmed transaction as legitimate via push challenge"
       },
       {
-        "action": "FILE_REPORT",
-        "route": "L2",
-        "reason": "R2 and Section 3a: customer denied unauthorized use with exposure > $1,000 or shared origin"
-      },
-      {
-        "action": "MONITOR_CONNECTED_CARDS",
+        "action": "ALLOW_TRANSACTION",
         "route": "auto",
-        "reason": "R6: shared infrastructure links this case to 1 other cards"
+        "reason": "R3: authorized charge released, false positive cleared"
       }
     ],
-    "what_changed": "Customer denial confirmed fraud (probability raised to 0.82), confirming card block and triggering case creation."
+    "what_changed": "Customer verified transaction as legitimate via registered iPhone Secure Enclave; security hold released, card remains active, and case closed without SAR filing."
   },
   "sar": {
-    "file": true,
-    "reason": "R2: confirmed unauthorized use with exposure > $1,000 or multi-card connection",
+    "file": false,
+    "reason": "Cleared by cardholder confirmation under Policy R3.",
     "narrative": "During the period 2016-12-19 to 2016-12-19, card C13171-K2 associated with customer C13171 was subjected to unauthorized transaction activity totaling $55.68 across 1 transaction(s). Activity matched fraud typology 'card_not_present_fraud' with model risk score 0.00. TigerGraph GSQL graph neighborhood traversal uncovered multi-card entity links. The activity was flagged via TigerGraph graph traversal and verified under bank policy rules. Card C13171-K2 has been blocked and marked for replacement. Connected cards (10114) were identified and placed under monitoring to mitigate systemic exposure.",
     "subjects": [
       "C13171",

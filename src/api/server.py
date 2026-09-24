@@ -978,41 +978,28 @@ def get_dashboard():
 
             </div>
 
-            <!-- Lower Section 2: Real IEEE-CIS Customer Transaction Ledger (Actual Ingested Data) -->
-            <div class="card-surface rounded-2xl p-5 border border-slate-200/90">
-                <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-                    <div class="flex items-center gap-2">
-                        <h3 class="text-sm font-extrabold text-[#0A1F1A] uppercase tracking-tight flex items-center gap-2">
-                            <i class="fa-solid fa-list-check text-[#00836C]"></i> Real IEEE-CIS Customer Transaction Ledger
-                        </h3>
-                        <span id="ledger-count-badge" class="text-[10px] font-bold px-2 py-0.5 rounded badge-obs">422 Txns on File</span>
+            <!-- Lower Section 2: Quick Jump to Dedicated IEEE-CIS Ledger -->
+            <div class="card-surface rounded-2xl p-4 border border-slate-200/90 flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-emerald-50/40 via-white to-slate-50/60">
+                <div class="flex items-center gap-3">
+                    <div class="h-10 w-10 rounded-xl bg-emerald-100 text-[#00836C] flex items-center justify-center text-lg shadow-2xs shrink-0">
+                        <i class="fa-solid fa-table-list"></i>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <span class="text-xs text-[#7D8D86] hidden sm:inline">Source: transactions.csv stream</span>
-                        <button onclick="switchMainTab('ledger')" class="px-2.5 py-1 rounded-lg bg-[#00836C] hover:bg-[#006e5a] text-white text-xs font-bold transition flex items-center gap-1.5 shadow-2xs">
-                            <i class="fa-solid fa-table-list"></i> Open Dedicated 26K Ledger Tab <i class="fa-solid fa-arrow-right text-[10px]"></i>
-                        </button>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs font-extrabold text-[#0A1F1A] uppercase tracking-tight">Full IEEE-CIS Customer Transaction Ledger</span>
+                            <span id="ledger-count-badge" class="text-[10px] font-bold px-2 py-0.5 rounded badge-obs">Txns on File</span>
+                        </div>
+                        <p class="text-xs text-[#46584F]">
+                            Browse the cardholder's complete transaction history, cross-channel spend (<span class="font-mono text-[11px] font-bold">W, H, C, R, S</span>), and baseline spending telemetry in the dedicated ledger tab.
+                        </p>
                     </div>
                 </div>
-
-                <div class="overflow-x-auto rounded-xl border border-slate-200/90 bg-white">
-                    <table class="w-full text-left text-xs border-collapse">
-                        <thead>
-                            <tr class="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-[#46584F] uppercase tracking-wider">
-                                <th class="p-2.5">Txn ID</th>
-                                <th class="p-2.5">Timestamp</th>
-                                <th class="p-2.5">Card ID</th>
-                                <th class="p-2.5">Amount</th>
-                                <th class="p-2.5">Channel</th>
-                                <th class="p-2.5">Model Risk</th>
-                                <th class="p-2.5">Region (addr1/2)</th>
-                                <th class="p-2.5">Exam Status</th>
-                            </tr>
-                        </thead>
-                        <tbody id="ledger-table-body" class="divide-y divide-slate-100">
-                            <!-- Injected via JS -->
-                        </tbody>
-                    </table>
+                <div>
+                    <button onclick="viewActiveCustomerInLedger()" class="px-3.5 py-2 rounded-xl bg-[#00836C] hover:bg-[#006e5a] text-white text-xs font-bold transition flex items-center gap-2 shadow-sm active:scale-95">
+                        <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                        <span>Explore Customer's Ledger in Dedicated Tab</span>
+                        <i class="fa-solid fa-chevron-right text-[10px]"></i>
+                    </button>
                 </div>
             </div>
 
@@ -2100,37 +2087,24 @@ def get_dashboard():
         }
 
         function renderTransactionLedger(data) {
-            const tableBody = document.getElementById('ledger-table-body');
-            tableBody.innerHTML = '';
             const total = data.customer_txns_total || 0;
-            const samples = data.customer_txns_sample || [];
-            const flaggedId = data.trigger_meta ? String(data.trigger_meta.flagged_txn_id) : "";
+            const badge = document.getElementById('ledger-count-badge');
+            if (badge) {
+                badge.innerText = `${total.toLocaleString()} Real Txns on File`;
+            }
+        }
 
-            document.getElementById('ledger-count-badge').innerText = `${total} Real Txns on File (Sample 25)`;
-
-            samples.forEach(tx => {
-                const tr = document.createElement('tr');
-                const isFlagged = String(tx.txn_id) === flaggedId;
-                if (isFlagged) {
-                    tr.className = "bg-rose-50/70 font-semibold border-l-4 border-rose-500";
-                } else {
-                    tr.className = "hover:bg-slate-50 transition";
+        function viewActiveCustomerInLedger() {
+            if (!activeCaseData) return;
+            const custId = activeCaseData.customer_id;
+            switchMainTab('ledger');
+            setTimeout(() => {
+                const select = document.getElementById('ledger-cust-filter');
+                if (select && custId) {
+                    select.value = custId;
+                    filterLedger(1);
                 }
-
-                tr.innerHTML = `
-                    <td class="p-2.5 font-mono text-[11px] text-[#0A1F1A]">${tx.txn_id}</td>
-                    <td class="p-2.5 text-slate-600">${tx.ts || 'N/A'}</td>
-                    <td class="p-2.5 font-mono text-slate-600">${tx.card_id}</td>
-                    <td class="p-2.5 font-bold ${isFlagged ? 'text-rose-700' : 'text-[#0A1F1A]'}">$${parseFloat(tx.amount).toFixed(2)}</td>
-                    <td class="p-2.5 text-slate-600"><span class="px-1.5 py-0.5 rounded bg-slate-100 text-[10px]">${tx.channel}</span></td>
-                    <td class="p-2.5"><span class="px-1.5 py-0.5 rounded font-mono text-[10px] ${tx.risk_score >= 0.7 ? 'bg-rose-100 text-rose-700 font-bold' : 'bg-slate-100 text-slate-600'}">${tx.risk_score}</span></td>
-                    <td class="p-2.5 text-slate-500 text-[10px] font-mono">${tx.addr1 || '-'}/${tx.addr2 || '-'}</td>
-                    <td class="p-2.5">
-                        ${isFlagged ? '<span class="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-extrabold animate-pulse"><i class="fa-solid fa-triangle-exclamation mr-1"></i>FLAGGED</span>' : '<span class="text-[10px] text-slate-400">History</span>'}
-                    </td>
-                `;
-                tableBody.appendChild(tr);
-            });
+            }, 100);
         }
 
         function openSimModal(sim) {

@@ -1,0 +1,19 @@
+CREATE OR REPLACE QUERY get_similar_cases(VERTEX<Transaction> target_txn, INT top_k) FOR GRAPH FraudGraph {
+    /*
+    Finds historical closed fraud cases that share device, IP, or merchant with target transaction.
+    */
+    SumAccum<INT> @shared_features_count;
+
+    Start = { target_txn };
+    Components = SELECT c FROM Start-(TXN_USED_DEVICE|TXN_USED_IP|TXN_TARGETED_MERCHANT)-:c;
+    PriorTxns = SELECT t FROM Components-(TXN_USED_DEVICE|TXN_USED_IP|TXN_TARGETED_MERCHANT)-Transaction:t
+                WHERE t != target_txn;
+
+    Cases = SELECT fc FROM PriorTxns-(TXN_IN_CASE)-FraudCase:fc
+            WHERE fc.status == "CLOSED"
+            ACCUM fc.@shared_features_count += 1
+            ORDER BY fc.@shared_features_count DESC
+            LIMIT top_k;
+
+    PRINT Cases[Cases.fraud_type, Cases.outcome, Cases.recommended_action, Cases.@shared_features_count];
+}

@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.DS_Store
+.env
+*.log
+outputs/cases/*.json
+!outputs/cases/CASE_BENCH_01.json
+!outputs/cases/CASE_BENCH_09.json
+!outputs/cases/benchmark_summary.json

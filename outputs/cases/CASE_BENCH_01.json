@@ -1,0 +1,121 @@
+{
+  "case_id": "CASE_BENCH_01",
+  "trigger": {
+    "trigger_id": "TRIG_001",
+    "trigger_type": "RISK_SCORE",
+    "transaction": {
+      "txn_id": "TXN_BENCH_001",
+      "amount": 470.0,
+      "timestamp": "2026-08-15T12:05:00",
+      "model_risk_score": 0.88,
+      "customer_id": "CUST_RING_01",
+      "card_id": "CARD_RING_01",
+      "merchant_id": "MERCH_CRYPTO_EXCHANGE",
+      "device_id": "DEV_EMULATOR_RING_X99",
+      "ip_address": "198.51.100.42",
+      "country": "US",
+      "city": "New York",
+      "is_online": true,
+      "attributes": {}
+    },
+    "source": "Real-time Scoring Gateway",
+    "initial_notes": "Automated model alert: High ML score on emulator device footprint."
+  },
+  "investigation_record": {
+    "steps_taken": [
+      "[2026-09-21T15:57:10.766562] Step 1: Initiated investigation for txn TXN_BENCH_001 triggered by TriggerType.RISK_SCORE",
+      "[2026-09-21T15:57:10.766602] Step 3: Identified patterns: ['DEVICE_IDENTITY_RING', 'CARD_TESTING_VELOCITY']",
+      "[2026-09-21T15:57:10.766618] Step 4: Risk Score: 0.92, Confidence: 0.90, Uncertainty: 0.10",
+      "[2026-09-21T15:57:10.766624] Step 5: Pre-evidence NBA: BLOCK_CARD via route AUTOMATED",
+      "[2026-09-21T15:57:10.766625] Step 6: High certainty or severe hard-risk threshold met; proceeding directly without delaying for interactive evidence.",
+      "[2026-09-21T15:57:10.766629] Step 7: Post-evidence NBA: BLOCK_CARD via route AUTOMATED",
+      "[2026-09-21T15:57:10.766641] Step 7: Mandatory SAR generated: SAR-CASE_BENCH_01-470"
+    ],
+    "created_at": "2026-09-21T15:57:10.766449",
+    "policy_matches": [
+      {
+        "rule_id": "POL-101",
+        "rule_name": "High Risk Immediate Containment",
+        "severity": "HIGH",
+        "description": "Transaction model risk score >= 0.85 or linked to multi-card device ring.",
+        "regulatory_reference": "Internal Risk Policy Sec 4.1"
+      }
+    ],
+    "historical_cases_referenced": [
+      {
+        "case_id": "HIST_CASE_1092",
+        "fraud_type": "DEVICE_IDENTITY_RING",
+        "outcome": "CONFIRMED_FRAUD",
+        "final_action": "BLOCK_CARD",
+        "sar_filed": true,
+        "similarity_score": 0.92
+      },
+      {
+        "case_id": "HIST_CASE_0481",
+        "fraud_type": "CARD_TESTING_VELOCITY",
+        "outcome": "CONFIRMED_FRAUD",
+        "final_action": "FREEZE_ACCOUNT",
+        "sar_filed": true,
+        "similarity_score": 0.85
+      },
+      {
+        "case_id": "HIST_CASE_0114",
+        "fraud_type": "FALSE_POSITIVE_TRAVEL",
+        "outcome": "CLEARED",
+        "final_action": "ALLOW_TRANSACTION",
+        "sar_filed": false,
+        "similarity_score": 0.74
+      }
+    ]
+  },
+  "graph_evidence": {
+    "shared_device_card_count": 8,
+    "shared_device_customer_count": 5,
+    "shared_ip_customer_count": 5,
+    "velocity_1h_txn_count": 2,
+    "velocity_1h_amount": 120.0,
+    "impossible_travel_detected": false,
+    "travel_speed_kmh": 45.0,
+    "prior_closed_fraud_cases": 0,
+    "prior_cleared_cases": 0,
+    "connected_blacklisted_entities": [],
+    "raw_subgraph_nodes": 18,
+    "raw_subgraph_edges": 24
+  },
+  "identified_patterns": [
+    "DEVICE_IDENTITY_RING",
+    "CARD_TESTING_VELOCITY"
+  ],
+  "uncertainty_level": 0.1,
+  "nba_pre_evidence": {
+    "action": "BLOCK_CARD",
+    "approval_route": "AUTOMATED",
+    "confidence": 0.9,
+    "rationale": "Critical risk score >= 0.90 and active syndicate ring indicators warrant immediate card block.",
+    "policy_citation": "Bank Policy POL-101"
+  },
+  "requested_evidence": null,
+  "received_evidence": null,
+  "nba_post_evidence": {
+    "action": "BLOCK_CARD",
+    "approval_route": "AUTOMATED",
+    "confidence": 0.9,
+    "rationale": "Critical risk score >= 0.90 and active syndicate ring indicators warrant immediate card block.",
+    "policy_citation": "Bank Policy POL-101"
+  },
+  "sar_report": {
+    "sar_id": "SAR-CASE_BENCH_01-470",
+    "subject_id": "CUST_RING_01",
+    "narrative": "Suspicious activity detected regarding customer CUST_RING_01 on card CARD_RING_01. Transaction TXN_BENCH_001 for amount $470.00 demonstrated patterns: DEVICE_IDENTITY_RING, CARD_TESTING_VELOCITY. TigerGraph analysis uncovered 8 connected cards and 5 connected customer entities operating across shared infrastructure.",
+    "suspected_violations": [
+      "DEVICE_IDENTITY_RING",
+      "CARD_TESTING_VELOCITY"
+    ],
+    "total_suspicious_amount": 470.0,
+    "filing_deadline_days": 30,
+    "requires_law_enforcement_escalation": false
+  },
+  "graph_persistence_confirmed": true,
+  "executive_summary": "Investigation CASE_BENCH_01 concluded with recommended action 'BLOCK_CARD' routed through 'AUTOMATED'. Initial risk assessment was 0.92 with uncertainty 0.10. Identified typologies: DEVICE_IDENTITY_RING, CARD_TESTING_VELOCITY.",
+  "reasoning_explanation": "EVIDENCE EVALUATED:\n- Transaction: $470.00 on card CARD_RING_01 at merchant MERCH_CRYPTO_EXCHANGE.\n- TigerGraph Graph Evidence: 8 cards linked to device DEV_EMULATOR_RING_X99, 1-hour velocity of 2 txns totaling $120.00.\n- Impossible Travel: False.\nWHY ADDITIONAL EVIDENCE WAS REQUESTED:\nInitial signals were ambiguous (uncertainty score 0.10). To avoid unnecessary customer friction and verify cardholder presence, a controlled SMS validation request was triggered under Policy POL-102.\nDECISION JUSTIFICATION:\nCritical risk score >= 0.90 and active syndicate ring indicators warrant immediate card block. Policy compliance citation: Bank Policy POL-101."
+}

@@ -1,0 +1,22 @@
+CREATE OR REPLACE QUERY detect_velocity_burst(VERTEX<Card> target_card, DATETIME window_start, DATETIME window_end) FOR GRAPH FraudGraph {
+    /*
+    Calculates velocity metrics: transaction count, total sum, and average risk score
+    for a card in a given time window.
+    */
+    SumAccum<INT> @@txn_count;
+    SumAccum<DOUBLE> @@total_amount;
+    AvgAccum @@avg_risk_score;
+
+    Start = { target_card };
+
+    Txns = SELECT t FROM Start-(CARD_TRANSACTION:e)-Transaction:t
+           WHERE t.timestamp >= window_start AND t.timestamp <= window_end
+           ACCUM 
+               @@txn_count += 1,
+               @@total_amount += t.amount,
+               @@avg_risk_score += t.model_risk_score;
+
+    PRINT @@txn_count AS velocity_count,
+          @@total_amount AS velocity_amount,
+          @@avg_risk_score AS avg_risk_score;
+}

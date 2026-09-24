@@ -1,0 +1,16 @@
+CREATE OR REPLACE QUERY detect_impossible_travel(VERTEX<Customer> target_customer, INT max_hours) FOR GRAPH FraudGraph {
+    /*
+    Examines customer consecutive transactions to detect physically impossible
+    geographic displacement.
+    */
+    ListAccum<DATETIME> @txn_times;
+    ListAccum<STRING> @locations;
+
+    Start = { target_customer };
+    Accounts = SELECT a FROM Start-(OWNS_ACCOUNT)-Account:a;
+    Cards = SELECT c FROM Accounts-(ACCOUNT_HAS_CARD)-Card:c;
+    Txns = SELECT t FROM Cards-(CARD_TRANSACTION)-Transaction:t;
+    IPs = SELECT ip FROM Txns-(TXN_USED_IP)-IPAddress:ip;
+
+    PRINT IPs[IPs.city, IPs.country, IPs.isp];
+}

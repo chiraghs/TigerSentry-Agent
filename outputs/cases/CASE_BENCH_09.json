@@ -1,0 +1,126 @@
+{
+  "case_id": "CASE_BENCH_09",
+  "trigger": {
+    "trigger_id": "TRIG_009",
+    "trigger_type": "RISK_SCORE",
+    "transaction": {
+      "txn_id": "TXN_BENCH_009",
+      "amount": 1120.0,
+      "timestamp": "2026-08-15T21:00:00",
+      "model_risk_score": 0.72,
+      "customer_id": "CUST_TRAVEL_09",
+      "card_id": "CARD_TRAVEL_09",
+      "merchant_id": "MERCH_LUXURY_WATCH",
+      "device_id": "DEV_UNKNOWN_09",
+      "ip_address": "192.0.2.9",
+      "country": "SG",
+      "city": "Singapore",
+      "is_online": true,
+      "attributes": {}
+    },
+    "source": "Real-time Scoring Gateway",
+    "initial_notes": "Impossible travel alert: card used in London 1.5h prior."
+  },
+  "investigation_record": {
+    "steps_taken": [
+      "[2026-09-21T15:57:10.769419] Step 1: Initiated investigation for txn TXN_BENCH_009 triggered by TriggerType.RISK_SCORE",
+      "[2026-09-21T15:57:10.769430] Step 3: Identified patterns: ['IMPOSSIBLE_TRAVEL']",
+      "[2026-09-21T15:57:10.769434] Step 4: Risk Score: 0.88, Confidence: 0.90, Uncertainty: 0.10",
+      "[2026-09-21T15:57:10.769437] Step 5: Pre-evidence NBA: REQUEST_CUSTOMER_CONFIRMATION via route AUTOMATED",
+      "[2026-09-21T15:57:10.769440] Step 6: Dispatched controlled evidence request: CUSTOMER_SMS_VALIDATION to customer CUST_TRAVEL_09",
+      "[2026-09-21T15:57:10.769443] Step 6: Received evidence response: status=SUCCESS, legit=False",
+      "[2026-09-21T15:57:10.769446] Step 7: Post-evidence NBA: FREEZE_ACCOUNT via route L1_FRAUD_ANALYST"
+    ],
+    "created_at": "2026-09-21T15:57:10.769416",
+    "policy_matches": [
+      {
+        "rule_id": "POL-102",
+        "rule_name": "Controlled Customer Verification",
+        "severity": "MEDIUM",
+        "description": "Moderate risk transaction requires step-up authentication or SMS confirmation before hard block.",
+        "regulatory_reference": "FFIEC Customer Authentication Guidelines"
+      }
+    ],
+    "historical_cases_referenced": [
+      {
+        "case_id": "HIST_CASE_1092",
+        "fraud_type": "DEVICE_IDENTITY_RING",
+        "outcome": "CONFIRMED_FRAUD",
+        "final_action": "BLOCK_CARD",
+        "sar_filed": true,
+        "similarity_score": 0.92
+      },
+      {
+        "case_id": "HIST_CASE_0481",
+        "fraud_type": "CARD_TESTING_VELOCITY",
+        "outcome": "CONFIRMED_FRAUD",
+        "final_action": "FREEZE_ACCOUNT",
+        "sar_filed": true,
+        "similarity_score": 0.85
+      },
+      {
+        "case_id": "HIST_CASE_0114",
+        "fraud_type": "FALSE_POSITIVE_TRAVEL",
+        "outcome": "CLEARED",
+        "final_action": "ALLOW_TRANSACTION",
+        "sar_filed": false,
+        "similarity_score": 0.74
+      }
+    ]
+  },
+  "graph_evidence": {
+    "shared_device_card_count": 1,
+    "shared_device_customer_count": 1,
+    "shared_ip_customer_count": 1,
+    "velocity_1h_txn_count": 2,
+    "velocity_1h_amount": 120.0,
+    "impossible_travel_detected": true,
+    "travel_speed_kmh": 1450.0,
+    "prior_closed_fraud_cases": 0,
+    "prior_cleared_cases": 0,
+    "connected_blacklisted_entities": [],
+    "raw_subgraph_nodes": 18,
+    "raw_subgraph_edges": 24
+  },
+  "identified_patterns": [
+    "IMPOSSIBLE_TRAVEL"
+  ],
+  "uncertainty_level": 0.1,
+  "nba_pre_evidence": {
+    "action": "REQUEST_CUSTOMER_CONFIRMATION",
+    "approval_route": "AUTOMATED",
+    "confidence": 0.9,
+    "rationale": "Moderate-to-high risk with uncertainty. Recommend real-time customer validation challenge before hard account action.",
+    "policy_citation": "Bank Policy POL-102"
+  },
+  "requested_evidence": {
+    "evidence_type": "CUSTOMER_SMS_VALIDATION",
+    "target_entity": "CUST_TRAVEL_09",
+    "request_details": {
+      "amount": 1120.0,
+      "merchant": "MERCH_LUXURY_WATCH",
+      "card_id": "CARD_TRAVEL_09"
+    },
+    "sent_at": "2026-09-21T15:57:10.769439"
+  },
+  "received_evidence": {
+    "evidence_type": "CUSTOMER_SMS_VALIDATION",
+    "status": "SUCCESS",
+    "customer_confirmed_legitimate": false,
+    "mfa_passed": null,
+    "analyst_finding": null,
+    "latency_ms": 350,
+    "notes": "Automated SMS verification response recorded."
+  },
+  "nba_post_evidence": {
+    "action": "FREEZE_ACCOUNT",
+    "approval_route": "L1_FRAUD_ANALYST",
+    "confidence": 0.98,
+    "rationale": "Customer explicitly confirmed unauthorized activity via two-factor SMS validation. Hard containment and investigation escalation initiated.",
+    "policy_citation": "Bank Policy POL-101 / POL-103"
+  },
+  "sar_report": null,
+  "graph_persistence_confirmed": true,
+  "executive_summary": "Investigation CASE_BENCH_09 concluded with recommended action 'FREEZE_ACCOUNT' routed through 'L1_FRAUD_ANALYST'. Initial risk assessment was 0.88 with uncertainty 0.10. Identified typologies: IMPOSSIBLE_TRAVEL.",
+  "reasoning_explanation": "EVIDENCE EVALUATED:\n- Transaction: $1120.00 on card CARD_TRAVEL_09 at merchant MERCH_LUXURY_WATCH.\n- TigerGraph Graph Evidence: 1 cards linked to device DEV_UNKNOWN_09, 1-hour velocity of 2 txns totaling $120.00.\n- Impossible Travel: True.\nWHY ADDITIONAL EVIDENCE WAS REQUESTED:\nInitial signals were ambiguous (uncertainty score 0.10). To avoid unnecessary customer friction and verify cardholder presence, a controlled SMS validation request was triggered under Policy POL-102.\nDECISION JUSTIFICATION:\nCustomer explicitly confirmed unauthorized activity via two-factor SMS validation. Hard containment and investigation escalation initiated. Policy compliance citation: Bank Policy POL-101 / POL-103."
+}

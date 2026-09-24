@@ -1,0 +1,11 @@
+CREATE OR REPLACE QUERY get_entity_subgraph(VERTEX<Transaction> target_txn) FOR GRAPH FraudGraph {
+    /*
+    Retrieves the 2-hop connected neighborhood of a transaction for GraphRAG grounding.
+    */
+    Start = { target_txn };
+    
+    Hop1 = SELECT v FROM Start-(:e)-:v;
+    Hop2 = SELECT v FROM Hop1-(:e)-:v;
+
+    PRINT Start, Hop1, Hop2;
+}

@@ -1,0 +1,27 @@
+CREATE OR REPLACE QUERY detect_device_ring(VERTEX<Transaction> target_txn) FOR GRAPH FraudGraph {
+    /*
+    Detects if the device or IP used by the target transaction is linked to
+    multiple distinct cards or customers, indicating a fraud ring or card testing attack.
+    */
+    TYPEDEF TUPLE<STRING entity_id, STRING entity_type, INT linked_cards, INT linked_customers> RingInfo;
+    ListAccum<RingInfo> @@ring_details;
+    SumAccum<INT> @card_count;
+    SumAccum<INT> @customer_count;
+    
+    Start = { target_txn };
+
+    // Hop 1: Get device & IP of this transaction
+    Components = SELECT d FROM Start-(TXN_USED_DEVICE|TXN_USED_IP)-:d;
+
+    // Hop 2: Find all other transactions sharing these components
+    RelatedTxns = SELECT t FROM Components-(TXN_USED_DEVICE|TXN_USED_IP)-Transaction:t;
+
+    // Hop 3: Trace to associated Cards and Customers
+    RelatedCards = SELECT c FROM RelatedTxns-(CARD_TRANSACTION)-Card:c;
+    RelatedAccounts = SELECT a FROM RelatedCards-(ACCOUNT_HAS_CARD)-Account:a;
+    RelatedCustomers = SELECT cust FROM RelatedAccounts-(OWNS_ACCOUNT)-Customer:cust;
+
+    PRINT RelatedCustomers.size() AS shared_customers_count,
+          RelatedCards.size() AS shared_cards_count,
+          RelatedTxns.size() AS shared_txns_count;
+}

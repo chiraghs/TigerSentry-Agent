@@ -23,10 +23,14 @@ from src.agent.models import (
     SAR,
     TriggerItem,
 )
+import gzip
 from src.rag.policy_engine import PolicyEngine
 
 logger = logging.getLogger("InvestigatorAgent")
-STAGED_PATH = "/Volumes/DiskD/HACKATHONS/Fraud-Detection/data/sample/staged_benchmark.json"
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DEFAULT_STAGED_PATH = os.path.join(ROOT_DIR, "data", "sample", "staged_benchmark.json")
+DEFAULT_STAGED_GZ = os.path.join(ROOT_DIR, "data", "sample", "staged_benchmark.json.gz")
+STAGED_PATH = os.getenv("STAGED_PATH", DEFAULT_STAGED_PATH)
 
 
 class OfficialFraudInvestigator:
@@ -40,9 +44,18 @@ class OfficialFraudInvestigator:
         if os.path.exists(self.staged_path):
             with open(self.staged_path, "r", encoding="utf-8") as f:
                 self._staged_data = json.load(f)
-            logger.info("Loaded staged benchmark dataset into investigator memory.")
+            logger.info(f"Loaded staged benchmark dataset from {self.staged_path}.")
+        elif os.path.exists(f"{self.staged_path}.gz"):
+            with gzip.open(f"{self.staged_path}.gz", "rt", encoding="utf-8") as f:
+                self._staged_data = json.load(f)
+            logger.info(f"Loaded compressed staged benchmark from {self.staged_path}.gz.")
+        elif os.path.exists(DEFAULT_STAGED_GZ):
+            with gzip.open(DEFAULT_STAGED_GZ, "rt", encoding="utf-8") as f:
+                self._staged_data = json.load(f)
+            logger.info(f"Loaded compressed staged benchmark from {DEFAULT_STAGED_GZ}.")
         else:
             logger.warning(f"Staged benchmark not found at {self.staged_path}. Please run indexer first.")
+
 
     def get_case_pack(self) -> List[Dict[str, Any]]:
         return self._staged_data.get("cases", []) if self._staged_data else []

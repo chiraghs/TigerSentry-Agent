@@ -14,4 +14,7 @@ data/**/*.csv
 data/**/*.json
 !data/sample/case_pack.csv
 !data/sample/README-2.md
+!data/sample/closed_cases_history.csv
+!data/sample/staged_benchmark.json
+!data/sample/staged_benchmark.json.gz
 

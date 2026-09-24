@@ -6,12 +6,21 @@ Light Mode UI inspired by Alpha-Fin with interactive Phone Simulator, GSQL Inspe
 
 import os
 import json
+from datetime import datetime, timezone
 from typing import Dict, Any, List
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from src.agent.models import TriggerEvent, InvestigationAnswerFile
+from src.agent.models import (
+    TriggerEvent,
+    InvestigationAnswerFile,
+    ActionType,
+    ApprovalRoute,
+    ControlledEvidenceRequest,
+    ControlledEvidenceResponse,
+    NextBestAction,
+)
 from src.agent.investigator import FraudInvestigatorAgent
 
 app = FastAPI(
@@ -83,7 +92,10 @@ def investigate_transaction(trigger: TriggerEvent):
 
 @app.post("/api/v1/simulate-response", response_model=InvestigationAnswerFile)
 def simulate_evidence_response(payload: SimulateEvidencePayload):
-    """Updates a case live by simulating interactive cardholder or analyst feedback."""
+    """
+    Updates a case live by processing real-time cardholder interactive validation.
+    Overrides uncertainty and updates Next-Best Action, case memory, and TigerGraph persistence.
+    """
     filepath = os.path.join(CASES_DIR, f"{payload.case_id}.json")
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="Case not found")
@@ -91,14 +103,107 @@ def simulate_evidence_response(payload: SimulateEvidencePayload):
     with open(filepath, "r") as f:
         raw_case = json.load(f)
 
-    trigger = TriggerEvent.model_validate(raw_case["trigger"])
-    agent.evidence_service.set_simulation_scenario(payload.scenario)
-    updated_ans = agent.investigate(trigger, case_id=payload.case_id)
-    
+    # Load existing case as answer file
+    case = InvestigationAnswerFile.model_validate(raw_case)
+    txn = case.trigger.transaction
+    now_str = datetime.now(timezone.utc).isoformat()
+
+    # Create request record if not already present
+    if not case.requested_evidence:
+        case.requested_evidence = ControlledEvidenceRequest(
+            evidence_type="CUSTOMER_SMS_VALIDATION",
+            target_entity=txn.customer_id,
+            request_details={"amount": txn.amount, "merchant": txn.merchant_id, "card_id": txn.card_id},
+        )
+
+    # Evaluate Scenario
+    if payload.scenario == "USER_CONFIRMED":
+        case.received_evidence = ControlledEvidenceResponse(
+            evidence_type="CUSTOMER_SMS_VALIDATION",
+            status="SUCCESS",
+            customer_confirmed_legitimate=True,
+            latency_ms=210,
+            notes="Customer verified: 'Yes, this was my purchase while traveling.'",
+        )
+        case.nba_post_evidence = NextBestAction(
+            action=ActionType.ALLOW_TRANSACTION,
+            approval_route=ApprovalRoute.AUTOMATED,
+            confidence=0.96,
+            rationale="Customer verified charge legitimacy via registered device; uncertainty resolved, clearing false positive flag.",
+            policy_citation="Bank Policy POL-102 (Customer Self-Service Clear)",
+        )
+        case.uncertainty_level = 0.05
+        case.sar_report = None  # Cleared
+        case.investigation_record["steps_taken"].append(
+            f"[{now_str}] Step 6: Interactive Cardholder Push: Verified Legitimate by Customer -> Post-NBA updated to ALLOW_TRANSACTION"
+        )
+
+    elif payload.scenario == "USER_FRAUD_ALERT":
+        route = ApprovalRoute.L1_FRAUD_ANALYST if txn.amount < 5000 else ApprovalRoute.L2_RISK_MANAGER
+        case.received_evidence = ControlledEvidenceResponse(
+            evidence_type="CUSTOMER_SMS_VALIDATION",
+            status="SUCCESS",
+            customer_confirmed_legitimate=False,
+            latency_ms=450,
+            notes="Customer alert: 'No, I did NOT authorize this charge! Freeze my account!'",
+        )
+        case.nba_post_evidence = NextBestAction(
+            action=ActionType.FREEZE_ACCOUNT,
+            approval_route=route,
+            confidence=0.99,
+            rationale="Customer explicitly confirmed unauthorized activity via two-factor mobile push. Emergency account containment executed.",
+            policy_citation="Bank Policy POL-101 / POL-103",
+        )
+        case.uncertainty_level = 0.00
+        # Generate SAR if warranted
+        sar_needed, sar_doc = agent.policy_engine.generate_sar_if_warranted(
+            case.case_id, txn, case.graph_evidence, case.identified_patterns
+        )
+        if sar_needed:
+            case.sar_report = sar_doc
+
+        case.investigation_record["steps_taken"].append(
+            f"[{now_str}] Step 6: Interactive Cardholder Push: FRAUD CONFIRMED BY CUSTOMER -> Post-NBA escalated to FREEZE_ACCOUNT"
+        )
+
+    else:  # TIMEOUT
+        case.received_evidence = ControlledEvidenceResponse(
+            evidence_type="CUSTOMER_SMS_VALIDATION",
+            status="TIMEOUT",
+            customer_confirmed_legitimate=None,
+            latency_ms=3000,
+            notes="Verification challenge expired after 10-minute SLA window without cardholder response.",
+        )
+        case.nba_post_evidence = NextBestAction(
+            action=ActionType.BLOCK_CARD,
+            approval_route=ApprovalRoute.L1_FRAUD_ANALYST,
+            confidence=0.80,
+            rationale="Customer verification challenge timed out. Precautionary temporary card block applied pending inbound analyst call.",
+            policy_citation="Bank Policy POL-101 (Precautionary Hold)",
+        )
+        case.uncertainty_level = 0.40
+        case.investigation_record["steps_taken"].append(
+            f"[{now_str}] Step 6: Interactive Cardholder Push: Challenge Timed Out (10m) -> Precautionary BLOCK_CARD applied"
+        )
+
+    # Persist updated decision back to TigerGraph
+    case_payload = {
+        "status": "CLOSED" if case.nba_post_evidence.action in [ActionType.ALLOW_TRANSACTION, ActionType.CLOSE_CASE] else "UNDER_REVIEW",
+        "fraud_type": case.identified_patterns[0].value if case.identified_patterns else "UNKNOWN",
+        "risk_score": txn.model_risk_score,
+        "uncertainty": case.uncertainty_level,
+        "recommended_action": case.nba_post_evidence.action.value,
+        "approval_route": case.nba_post_evidence.approval_route.value,
+        "sar_filed": case.sar_report is not None,
+    }
+    agent.tg_client.write_investigation_case(case.case_id, case_payload)
+    case.graph_persistence_confirmed = True
+
+    # Save to disk
     with open(filepath, "w") as f:
-        json.dump(updated_ans.model_dump(mode="json"), f, indent=2)
+        json.dump(case.model_dump(mode="json"), f, indent=2)
         
-    return updated_ans
+    return case
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -136,23 +241,45 @@ def serve_dashboard():
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
         /* Phone Simulator Styling */
         .phone-frame {
-            border: 10px solid #1E293B;
-            border-radius: 36px;
-            box-shadow: 0 20px 40px -15px rgba(0,0,0,0.25);
+            border: 8px solid #1E293B;
+            border-radius: 32px;
+            box-shadow: 0 20px 40px -15px rgba(0,0,0,0.22);
             background: #FFFFFF;
             overflow: hidden;
+            transition: all 0.3s ease;
         }
         .phone-notch {
-            width: 110px;
-            height: 18px;
+            width: 100px;
+            height: 16px;
             background: #1E293B;
-            border-bottom-left-radius: 12px;
-            border-bottom-right-radius: 12px;
+            border-bottom-left-radius: 10px;
+            border-bottom-right-radius: 10px;
             margin: 0 auto;
+        }
+        /* Toast notification */
+        #toast {
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            transform: translateY(-100%);
+            opacity: 0;
+        }
+        #toast.show {
+            transform: translateY(0);
+            opacity: 1;
         }
     </style>
 </head>
 <body class="min-h-screen flex flex-col antialiased">
+
+    <!-- Floating Toast Notification (Alpha-Fin Style) -->
+    <div id="toast" class="fixed top-5 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl bg-white border border-slate-200/90 shadow-2xl text-xs font-semibold text-slate-800 pointer-events-none">
+        <div id="toast-icon" class="h-7 w-7 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-sm">
+            <i class="fa-solid fa-check"></i>
+        </div>
+        <div>
+            <span id="toast-title" class="block font-bold text-[#0A1F1A]">Action Processed</span>
+            <span id="toast-desc" class="block text-[11px] text-[#7D8D86]">Customer verification completed.</span>
+        </div>
+    </div>
 
     <!-- Sticky Partner Header (Alpha-Fin + TigerGraph Co-Branding) -->
     <header class="sticky top-0 z-40 bg-white/95 border-b border-slate-200/90 backdrop-blur-md px-6 py-3">
@@ -161,9 +288,8 @@ def serve_dashboard():
             <!-- Left Branding & TigerGraph Logo -->
             <div class="flex items-center gap-4">
                 <div class="flex items-center gap-3">
-                    <!-- TigerGraph Orange Shield -->
                     <div class="h-10 w-10 rounded-xl bg-gradient-to-tr from-[#FF5A00] to-[#FF8A00] flex items-center justify-center text-white shadow-md font-bold text-xl">
-                        <i class="fa-solid fa-tiger"></i>
+                        <i class="fa-solid fa-shield-cat"></i>
                     </div>
                     <div>
                         <div class="flex items-center gap-2">
@@ -437,41 +563,47 @@ def serve_dashboard():
                         <span class="text-[11px] font-extrabold uppercase tracking-wider text-[#7D8D86] flex items-center gap-1.5">
                             <i class="fa-solid fa-mobile-screen-button text-[#FF5A00]"></i> Stage 2: Cardholder Push Simulator
                         </span>
-                        <span class="text-[10px] px-2 py-0.5 rounded bg-orange-50 text-[#FF5A00] border border-orange-200 font-mono font-bold">
-                            Interactive Mock
+                        <span id="phone-status-badge" class="text-[10px] px-2 py-0.5 rounded bg-orange-50 text-[#FF5A00] border border-orange-200 font-mono font-bold">
+                            Waiting for Input
                         </span>
                     </div>
 
                     <!-- Mini Phone Widget -->
-                    <div class="phone-frame p-3 bg-slate-50 mx-auto max-w-[280px]">
+                    <div class="phone-frame p-3 bg-slate-50 mx-auto max-w-[290px]">
                         <div class="phone-notch mb-2"></div>
-                        <div class="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm text-center">
-                            <div class="h-8 w-8 rounded-full bg-orange-100 text-[#FF5A00] flex items-center justify-center mx-auto mb-2 text-sm">
-                                <i class="fa-solid fa-bell"></i>
-                            </div>
-                            <h5 class="text-xs font-bold text-[#0A1F1A]">Bank Fraud Verification</h5>
-                            <p class="text-[10px] text-[#46584F] mt-1 leading-snug">
-                                Did you authorize <strong id="sim-phone-amount">$470.00</strong> at <span id="sim-phone-merchant" class="font-semibold">CRYPTO_EXCHANGE</span>?
-                            </p>
+                        
+                        <!-- Dynamic Phone Screen Container -->
+                        <div id="phone-screen-content" class="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm text-center min-h-[220px] flex flex-col justify-between">
                             
-                            <div class="mt-3 flex flex-col gap-1.5">
-                                <button onclick="triggerSimulate('USER_CONFIRMED')" class="w-full py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] transition shadow-sm">
-                                    <i class="fa-solid fa-check mr-1"></i> Yes, I Did (Legit)
+                            <div>
+                                <div class="h-9 w-9 rounded-full bg-orange-100 text-[#FF5A00] flex items-center justify-center mx-auto mb-2 text-sm shadow-sm">
+                                    <i class="fa-solid fa-bell animate-bounce"></i>
+                                </div>
+                                <h5 class="text-xs font-bold text-[#0A1F1A]">Bank Security Push Alert</h5>
+                                <p class="text-[11px] text-[#46584F] mt-1.5 leading-snug">
+                                    Did you authorize <strong id="sim-phone-amount" class="text-[#0A1F1A]">$470.00</strong> at <span id="sim-phone-merchant" class="font-semibold text-[#00836C]">CRYPTO_EXCHANGE</span>?
+                                </p>
+                            </div>
+
+                            <div class="mt-4 flex flex-col gap-2">
+                                <button onclick="triggerSimulate('USER_CONFIRMED')" class="w-full py-2 rounded-xl bg-[#00836C] hover:bg-[#00594A] text-white font-bold text-xs transition shadow-sm flex items-center justify-center gap-1.5 active:scale-95">
+                                    <i class="fa-solid fa-check"></i> Yes, I Did (Clear Charge)
                                 </button>
-                                <button onclick="triggerSimulate('USER_FRAUD_ALERT')" class="w-full py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] transition shadow-sm">
-                                    <i class="fa-solid fa-ban mr-1"></i> No, Lock Card! (Fraud)
+                                <button onclick="triggerSimulate('USER_FRAUD_ALERT')" class="w-full py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition shadow-sm flex items-center justify-center gap-1.5 active:scale-95">
+                                    <i class="fa-solid fa-ban"></i> No, Fraud! (Lock Card)
                                 </button>
-                                <button onclick="triggerSimulate('TIMEOUT')" class="w-full py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-[10px] transition">
-                                    <i class="fa-solid fa-hourglass-end mr-1"></i> Simulate 10m Timeout
+                                <button onclick="triggerSimulate('TIMEOUT')" class="w-full py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-[10px] transition active:scale-95">
+                                    <i class="fa-solid fa-hourglass-end mr-1"></i> Simulate 10m Challenge Timeout
                                 </button>
                             </div>
+
                         </div>
                     </div>
 
                 </div>
 
                 <!-- Stage 3: Post-Evidence Final NBA & Approval Route -->
-                <div class="bg-white border border-slate-200/90 rounded-2xl p-5 card-shadow">
+                <div id="stage3-card" class="bg-white border border-slate-200/90 rounded-2xl p-5 card-shadow transition-all duration-300">
                     <div class="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
                         <span class="text-[11px] font-extrabold uppercase tracking-wider text-[#00836C] flex items-center gap-1.5">
                             <i class="fa-solid fa-shield-halved text-[#00836C]"></i> Stage 3: Final Next-Best Action
@@ -524,6 +656,7 @@ def serve_dashboard():
         let currentNetwork = null;
         let allCases = [];
         let activeCaseId = "CASE_BENCH_01";
+        let activeCaseData = null;
 
         async function fetchCases() {
             try {
@@ -588,25 +721,155 @@ def serve_dashboard():
 
             try {
                 const res = await fetch(`/api/v1/cases/${caseId}`);
-                const data = await res.json();
-                renderCaseDetails(data);
+                activeCaseData = await res.json();
+                renderCaseDetails(activeCaseData);
+                resetPhoneScreen(activeCaseData);
             } catch (err) {
                 console.error("Error loading case:", err);
             }
         }
 
+        function resetPhoneScreen(data) {
+            const txn = data.trigger.transaction;
+            const content = document.getElementById('phone-screen-content');
+            document.getElementById('phone-status-badge').className = "text-[10px] px-2 py-0.5 rounded bg-orange-50 text-[#FF5A00] border border-orange-200 font-mono font-bold";
+            document.getElementById('phone-status-badge').innerText = "Waiting for Input";
+
+            content.innerHTML = `
+                <div>
+                    <div class="h-9 w-9 rounded-full bg-orange-100 text-[#FF5A00] flex items-center justify-center mx-auto mb-2 text-sm shadow-sm">
+                        <i class="fa-solid fa-bell animate-bounce"></i>
+                    </div>
+                    <h5 class="text-xs font-bold text-[#0A1F1A]">Bank Security Push Alert</h5>
+                    <p class="text-[11px] text-[#46584F] mt-1.5 leading-snug">
+                        Did you authorize <strong class="text-[#0A1F1A]">$${txn.amount.toFixed(2)}</strong> at <span class="font-semibold text-[#00836C]">${txn.merchant_id}</span>?
+                    </p>
+                </div>
+
+                <div class="mt-4 flex flex-col gap-2">
+                    <button onclick="triggerSimulate('USER_CONFIRMED')" class="w-full py-2 rounded-xl bg-[#00836C] hover:bg-[#00594A] text-white font-bold text-xs transition shadow-sm flex items-center justify-center gap-1.5 active:scale-95">
+                        <i class="fa-solid fa-check"></i> Yes, I Did (Clear Charge)
+                    </button>
+                    <button onclick="triggerSimulate('USER_FRAUD_ALERT')" class="w-full py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition shadow-sm flex items-center justify-center gap-1.5 active:scale-95">
+                        <i class="fa-solid fa-ban"></i> No, Fraud! (Lock Card)
+                    </button>
+                    <button onclick="triggerSimulate('TIMEOUT')" class="w-full py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-[10px] transition active:scale-95">
+                        <i class="fa-solid fa-hourglass-end mr-1"></i> Simulate 10m Challenge Timeout
+                    </button>
+                </div>
+            `;
+        }
+
         async function triggerSimulate(scenario) {
+            const content = document.getElementById('phone-screen-content');
+            const statusBadge = document.getElementById('phone-status-badge');
+
+            // 1. Visually update phone screen immediately
+            if (scenario === 'USER_CONFIRMED') {
+                statusBadge.className = "text-[10px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono font-bold";
+                statusBadge.innerText = "Confirmed Legit";
+                content.innerHTML = `
+                    <div class="my-auto py-2">
+                        <div class="h-12 w-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-2 text-xl shadow-inner animate-pulse">
+                            <i class="fa-solid fa-circle-check"></i>
+                        </div>
+                        <h5 class="text-xs font-bold text-emerald-900">Authorization Verified!</h5>
+                        <p class="text-[11px] text-[#46584F] mt-1.5 leading-snug">
+                            Cardholder verified purchase legitimacy via mobile push. Uncertainty resolved to 0.05.
+                        </p>
+                        <div class="mt-4 pt-3 border-t border-slate-100">
+                            <button onclick="resetPhoneScreen(activeCaseData)" class="text-[10px] text-[#00836C] font-bold hover:underline">
+                                <i class="fa-solid fa-rotate-left mr-1"></i> Test Another Action
+                            </button>
+                        </div>
+                    </div>
+                `;
+                showToast("Cardholder Verified Legit", "Decision updated to ALLOW_TRANSACTION (Automated)", "good");
+            } else if (scenario === 'USER_FRAUD_ALERT') {
+                statusBadge.className = "text-[10px] px-2 py-0.5 rounded bg-rose-50 text-rose-800 border border-rose-200 font-mono font-bold";
+                statusBadge.innerText = "Fraud Alert Confirmed";
+                content.innerHTML = `
+                    <div class="my-auto py-2">
+                        <div class="h-12 w-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-2 text-xl shadow-inner animate-pulse">
+                            <i class="fa-solid fa-shield-virus"></i>
+                        </div>
+                        <h5 class="text-xs font-bold text-rose-900">Card Locked & Escalated!</h5>
+                        <p class="text-[11px] text-[#46584F] mt-1.5 leading-snug">
+                            Unauthorized activity confirmed. Account frozen and routed to L1/L2 Fraud Analyst.
+                        </p>
+                        <div class="mt-4 pt-3 border-t border-slate-100">
+                            <button onclick="resetPhoneScreen(activeCaseData)" class="text-[10px] text-[#00836C] font-bold hover:underline">
+                                <i class="fa-solid fa-rotate-left mr-1"></i> Test Another Action
+                            </button>
+                        </div>
+                    </div>
+                `;
+                showToast("Fraud Reported by Cardholder", "Account containment executed: FREEZE_ACCOUNT", "critical");
+            } else {
+                statusBadge.className = "text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 font-mono font-bold";
+                statusBadge.innerText = "Challenge Expired";
+                content.innerHTML = `
+                    <div class="my-auto py-2">
+                        <div class="h-12 w-12 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center mx-auto mb-2 text-xl shadow-inner">
+                            <i class="fa-solid fa-clock"></i>
+                        </div>
+                        <h5 class="text-xs font-bold text-slate-900">Challenge Timed Out</h5>
+                        <p class="text-[11px] text-[#46584F] mt-1.5 leading-snug">
+                            No response received within 10m SLA. Precautionary BLOCK_CARD applied.
+                        </p>
+                        <div class="mt-4 pt-3 border-t border-slate-100">
+                            <button onclick="resetPhoneScreen(activeCaseData)" class="text-[10px] text-[#00836C] font-bold hover:underline">
+                                <i class="fa-solid fa-rotate-left mr-1"></i> Test Another Action
+                            </button>
+                        </div>
+                    </div>
+                `;
+                showToast("Challenge Timeout (10m)", "Precautionary temporary BLOCK_CARD applied", "warning");
+            }
+
+            // 2. Call backend to update Agent decision & TigerGraph graph
             try {
                 const res = await fetch('/api/v1/simulate-response', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ case_id: activeCaseId, scenario: scenario })
                 });
-                const updated = await res.json();
-                renderCaseDetails(updated);
+                activeCaseData = await res.json();
+                renderCaseDetails(activeCaseData);
+
+                // Highlight Stage 3 card with animated glow
+                const s3Card = document.getElementById('stage3-card');
+                s3Card.className = "bg-white border-2 border-emerald-500 rounded-2xl p-5 card-shadow ring-4 ring-emerald-100 transition-all duration-300";
+                setTimeout(() => {
+                    s3Card.className = "bg-white border border-slate-200/90 rounded-2xl p-5 card-shadow transition-all duration-300";
+                }, 1500);
+
             } catch (err) {
                 console.error("Simulation error:", err);
             }
+        }
+
+        function showToast(title, desc, type) {
+            const toast = document.getElementById('toast');
+            const icon = document.getElementById('toast-icon');
+            document.getElementById('toast-title').innerText = title;
+            document.getElementById('toast-desc').innerText = desc;
+
+            if (type === 'good') {
+                icon.className = "h-7 w-7 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-sm";
+                icon.innerHTML = '<i class="fa-solid fa-check"></i>';
+            } else if (type === 'critical') {
+                icon.className = "h-7 w-7 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center text-sm";
+                icon.innerHTML = '<i class="fa-solid fa-ban"></i>';
+            } else {
+                icon.className = "h-7 w-7 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-sm";
+                icon.innerHTML = '<i class="fa-solid fa-clock"></i>';
+            }
+
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3200);
         }
 
         function renderCaseDetails(data) {
@@ -614,9 +877,6 @@ def serve_dashboard():
             document.getElementById('active-case-id').innerText = data.case_id;
             document.getElementById('active-txn-headline').innerText = `Transaction ${txn.txn_id}`;
             document.getElementById('active-txn-meta').innerText = `Amount: $${txn.amount.toFixed(2)} · Card: ${txn.card_id} · Merchant: ${txn.merchant_id}`;
-
-            document.getElementById('sim-phone-amount').innerText = `$${txn.amount.toFixed(2)}`;
-            document.getElementById('sim-phone-merchant').innerText = txn.merchant_id;
 
             const risk = txn.model_risk_score;
             const rBadge = document.getElementById('active-risk-badge');
@@ -663,6 +923,14 @@ def serve_dashboard():
             document.getElementById('post-route-badge').innerText = data.nba_post_evidence.approval_route;
             document.getElementById('post-action-text').innerText = data.nba_post_evidence.action;
             document.getElementById('post-rationale-text').innerText = data.nba_post_evidence.rationale;
+            
+            if (data.nba_post_evidence.action === 'ALLOW_TRANSACTION') {
+                document.getElementById('post-action-text').className = "text-base font-extrabold text-[#00836C]";
+            } else if (data.nba_post_evidence.action === 'FREEZE_ACCOUNT') {
+                document.getElementById('post-action-text').className = "text-base font-extrabold text-rose-600";
+            } else {
+                document.getElementById('post-action-text').className = "text-base font-extrabold text-amber-600";
+            }
 
             // SAR
             const sarPanel = document.getElementById('sar-panel');

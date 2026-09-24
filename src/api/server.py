@@ -125,6 +125,7 @@ def list_cases():
 
 
 @app.get("/api/v1/cases-summary")
+@app.get("/api/v1/cases/summary")
 def get_cases_summary():
     """Returns rich metadata summary for all 20 official exam cases from real data."""
     summary_list = []

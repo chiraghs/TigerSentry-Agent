@@ -4,9 +4,9 @@ services:
     env: python
     plan: free
     region: oregon
-    buildCommand: "pip install --upgrade pip && pip install -r requirements.txt"
-    startCommand: "uvicorn src.api.server:app --host 0.0.0.0 --port $PORT"
-    healthCheckPath: /api/v1/cases/summary
+    buildCommand: "pip install --no-cache-dir -r requirements.txt"
+    startCommand: "python -m uvicorn src.api.server:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
     autoDeploy: true
     envVars:
       - key: PYTHONUNBUFFERED

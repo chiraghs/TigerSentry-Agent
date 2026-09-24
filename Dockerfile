@@ -15,6 +15,7 @@ COPY cases/ cases/
 COPY outputs/ outputs/
 COPY gsql/ gsql/
 COPY schema/ schema/
+COPY screenshots/ screenshots/
 
 EXPOSE 8000
 

@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: tigersentry-agent
+    env: python
+    plan: free
+    region: oregon
+    buildCommand: "pip install --upgrade pip && pip install -r requirements.txt"
+    startCommand: "uvicorn src.api.server:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /api/v1/cases/summary
+    autoDeploy: true
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PYTHONDONTWRITEBYTECODE
+        value: "1"
+      - key: LLM_PROVIDER
+        value: "auto"
+      # Optional: Add your free API key in Render Dashboard Environment Settings:
+      # - key: GEMINI_API_KEY
+      #   sync: false
+      # - key: GROQ_API_KEY
+      #   sync: false

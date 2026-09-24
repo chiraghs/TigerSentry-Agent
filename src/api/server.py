@@ -28,6 +28,7 @@ from src.agent.models import (
     EvidenceRequest,
 )
 from src.agent.investigator import OfficialFraudInvestigator
+from src.agent.action_dispatcher import ActionDispatcher
 
 app = FastAPI(
     title="TigerSentry — TigerGraph Agentic Fraud Investigation",
@@ -43,6 +44,31 @@ CASES_CACHE: Dict[str, Dict[str, Any]] = {}
 class SimulateEvidencePayload(BaseModel):
     case_id: str
     scenario: str  # USER_FRAUD_ALERT, USER_CONFIRMED, TIMEOUT
+
+
+class ExecuteActionPayload(BaseModel):
+    action: str
+    case_id: str
+    context: Optional[Dict[str, Any]] = None
+
+
+class ExecuteAllPayload(BaseModel):
+    case_id: str
+    actions: List[str]
+    context: Optional[Dict[str, Any]] = None
+
+
+@app.post("/api/v1/actions/execute")
+def execute_downstream_action(payload: ExecuteActionPayload):
+    """Dispatches a simulated mock banking API action."""
+    return ActionDispatcher.execute_action(payload.action, payload.case_id, payload.context)
+
+
+@app.post("/api/v1/actions/execute-all")
+def execute_all_actions(payload: ExecuteAllPayload):
+    """Dispatches a batch of simulated mock banking API actions."""
+    return ActionDispatcher.execute_all(payload.actions, payload.case_id, payload.context)
+
 
 
 @app.get("/health")
@@ -637,7 +663,12 @@ def get_dashboard():
                                 </span>
                                 <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Post-Evidence</span>
                             </div>
-                            <p class="text-[11px] text-[#46584F] mb-3">Defensible actions determined under bank policy following cardholder response.</p>
+                            <p class="text-[11px] text-[#46584F] mb-2.5">Defensible actions determined under bank policy following cardholder response.</p>
+
+                            <!-- Primary Action Dispatcher Trigger -->
+                            <button onclick="dispatchAllActions()" class="w-full mb-3 py-2 px-3 rounded-xl bg-[#00836C] hover:bg-[#00594A] text-white font-extrabold text-xs transition shadow-sm flex items-center justify-center gap-1.5 active:scale-95">
+                                <i class="fa-solid fa-bolt text-amber-300"></i> Dispatch All Actions to Core Banking
+                            </button>
 
                             <div id="stage3-actions" class="space-y-2">
                                 <!-- Injected via JS -->
@@ -668,8 +699,16 @@ def get_dashboard():
                                     View SAR
                                 </button>
                             </div>
+
+                            <!-- Mock API Execution Terminal Button -->
+                            <div class="mt-2 pt-2 border-t border-slate-200/80">
+                                <button onclick="toggleActionExecutionModal()" class="w-full py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition flex items-center justify-center gap-1.5">
+                                    <i class="fa-solid fa-network-wired text-[#00836C]"></i> Banking Mock API Logs (<span id="executed-count">0</span> dispatched)
+                                </button>
+                            </div>
                         </div>
                     </div>
+
 
                 </div>
             </div>
@@ -867,7 +906,42 @@ def get_dashboard():
         </div>
     </div>
 
+    <!-- Mock Action Execution Modal -->
+    <div id="action-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-200">
+                <div class="flex items-center gap-2">
+                    <div class="h-8 w-8 rounded-lg bg-emerald-100 text-[#00836C] flex items-center justify-center font-bold">
+                        <i class="fa-solid fa-network-wired"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-extrabold text-[#0A1F1A]">Downstream Banking Mock API Dispatcher</h3>
+                        <p class="text-xs text-[#7D8D86]">Core Banking CMS · Payment Gateway · FinCEN E-Filing · CRM</p>
+                    </div>
+                </div>
+                <button onclick="toggleActionExecutionModal()" class="text-slate-400 hover:text-slate-700 text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="mt-4 space-y-3">
+                <div class="flex items-center justify-between text-xs">
+                    <span class="font-bold text-[#0A1F1A]">Live Execution Trace Log:</span>
+                    <span id="action-modal-status-badge" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">Ready</span>
+                </div>
+                <div id="action-dispatch-logs" class="space-y-2 max-h-72 overflow-y-auto p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-[11px]">
+                    <div class="text-slate-400">// Ready to dispatch mock banking actions...</div>
+                </div>
+            </div>
+            <div class="mt-6 pt-3 border-t border-slate-200 flex justify-end">
+                <button onclick="toggleActionExecutionModal()" class="px-4 py-2 rounded-xl bg-[#00836C] text-white font-bold text-xs hover:bg-[#006e5a] transition">
+                    Done
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Notification Toast -->
+
     <div id="toast" class="toast">
         <div id="toast-icon" class="h-7 w-7 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-sm">
             <i class="fa-solid fa-check"></i>
@@ -1132,16 +1206,24 @@ def get_dashboard():
             document.getElementById('sim-modal').classList.add('hidden');
         }
 
+        let executedActionsLog = [];
+
+
         function renderStage3Actions(nba, sar) {
             const stage3Div = document.getElementById('stage3-actions');
             stage3Div.innerHTML = '';
             (nba.final || []).forEach(act => {
                 const item = document.createElement('div');
-                item.className = "p-2.5 rounded-lg bg-emerald-50/50 border border-emerald-200 shadow-xs";
+                item.className = "p-2.5 rounded-lg bg-emerald-50/50 border border-emerald-200 shadow-xs flex flex-col gap-1.5";
                 item.innerHTML = `
-                    <div class="flex items-center justify-between mb-1">
+                    <div class="flex items-center justify-between">
                         <span class="font-extrabold text-xs text-emerald-950">${act.action}</span>
-                        <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 uppercase">Route: ${act.route}</span>
+                        <div class="flex items-center gap-1.5">
+                            <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 uppercase">Route: ${act.route}</span>
+                            <button onclick="dispatchSingleAction('${act.action}')" class="px-2 py-0.5 rounded bg-[#00836C] hover:bg-[#00594A] text-white text-[9px] font-bold shadow-xs transition active:scale-95 flex items-center gap-1">
+                                <i class="fa-solid fa-bolt text-[8px] text-amber-300"></i> Dispatch
+                            </button>
+                        </div>
                     </div>
                     <p class="text-[11px] text-emerald-900 leading-tight">${act.reason}</p>
                 `;
@@ -1160,6 +1242,96 @@ def get_dashboard():
                 sarBlock.style.display = 'none';
             }
         }
+
+        async function dispatchSingleAction(actionName) {
+            const c = activeCaseData ? activeCaseData.case : {};
+            const context = {
+                card_id: (c.connected_card_ids && c.connected_card_ids.length > 0) ? c.connected_card_ids[0] : "CARD-PRIMARY",
+                customer_id: activeCaseData ? activeCaseData.customer_id : "C12382",
+                exposure_usd: c.exposure_usd || 0.0,
+                connected_card_ids: c.connected_card_ids || [],
+                txn_id: (c.affected_txn_ids && c.affected_txn_ids.length > 0) ? c.affected_txn_ids[0] : "TXN-01"
+            };
+
+            try {
+                const res = await fetch('/api/v1/actions/execute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: actionName, case_id: activeCaseId, context: context })
+                });
+                const result = await res.json();
+                executedActionsLog.unshift(result);
+                updateActionLogsUI();
+                showToast(`Action ${actionName} Dispatched`, `${result.system} responded ${result.http_status} (${result.latency_ms}ms)`, "good");
+                toggleActionExecutionModal();
+            } catch (err) {
+                console.error("Action execution error:", err);
+            }
+        }
+
+        async function dispatchAllActions() {
+            if (!activeCaseData || !activeCaseData.next_best_actions || !activeCaseData.next_best_actions.final) return;
+            const actions = activeCaseData.next_best_actions.final.map(a => a.action);
+            const c = activeCaseData.case || {};
+            const context = {
+                card_id: (c.connected_card_ids && c.connected_card_ids.length > 0) ? c.connected_card_ids[0] : "CARD-PRIMARY",
+                customer_id: activeCaseData ? activeCaseData.customer_id : "C12382",
+                exposure_usd: c.exposure_usd || 0.0,
+                connected_card_ids: c.connected_card_ids || [],
+                txn_id: (c.affected_txn_ids && c.affected_txn_ids.length > 0) ? c.affected_txn_ids[0] : "TXN-01"
+            };
+
+            try {
+                const res = await fetch('/api/v1/actions/execute-all', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ actions: actions, case_id: activeCaseId, context: context })
+                });
+                const results = await res.json();
+                results.forEach(r => executedActionsLog.unshift(r));
+                updateActionLogsUI();
+                showToast(`Executed ${results.length} Actions`, "All mock banking & regulatory endpoints responded 200 OK", "good");
+                toggleActionExecutionModal();
+            } catch (err) {
+                console.error("Execute all error:", err);
+            }
+        }
+
+        function updateActionLogsUI() {
+            const countElem = document.getElementById('executed-count');
+            if (countElem) countElem.innerText = executedActionsLog.length;
+            const logContainer = document.getElementById('action-dispatch-logs');
+            if (!logContainer) return;
+            logContainer.innerHTML = '';
+
+            executedActionsLog.slice(0, 10).forEach(entry => {
+                const div = document.createElement('div');
+                div.className = "p-2.5 rounded-lg bg-slate-800/90 border border-slate-700/80 mb-2";
+                div.innerHTML = `
+                    <div class="flex items-center justify-between text-[10px] text-slate-400 mb-1">
+                        <span class="text-emerald-400 font-bold">[${entry.http_status} ${entry.status}]</span>
+                        <span class="text-slate-200 font-bold">${entry.system}</span>
+                        <span class="text-amber-300 font-mono">${entry.latency_ms}ms · ${entry.trace_id}</span>
+                    </div>
+                    <div class="text-slate-100 font-bold text-xs">${entry.action}</div>
+                    <div class="text-slate-300 text-[10px] mt-0.5">${entry.log}</div>
+                `;
+                logContainer.appendChild(div);
+            });
+        }
+
+        function toggleActionExecutionModal() {
+            const modal = document.getElementById('action-modal');
+            if (modal) {
+                if (modal.classList.contains('hidden')) {
+                    updateActionLogsUI();
+                    modal.classList.remove('hidden');
+                } else {
+                    modal.classList.add('hidden');
+                }
+            }
+        }
+
 
         function resetPhoneSimulator(data) {
             const c = data.case || {};

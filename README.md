@@ -12,17 +12,35 @@
 ---
 
 ## 📑 Table of Contents
-1. [System Architecture](#-system-architecture)
-2. [Project Structure](#-project-structure)
-3. [8-Step Autonomous Case Lifecycle](#-8-step-autonomous-case-lifecycle)
-4. [TigerGraph Schema & GSQL Queries](#-tigergraph-schema--gsql-queries)
-5. [Database Seeder & Data Staging](#-database-seeder--data-staging)
-6. [Interactive Cockpit UI & Banking Mock APIs](#-interactive-cockpit-ui--banking-mock-apis)
-7. [Official Benchmark Submission (cases/)](#-official-benchmark-submission-cases)
-8. [Quick Start & Local Setup](#-quick-start--local-setup)
-9. [Cloud Deployment (Render / Railway / Docker)](#-cloud-deployment-render--railway--docker)
+1. [Screenshots & UI Showcase](#-screenshots--ui-showcase)
+2. [System Architecture](#-system-architecture)
+3. [Project Structure](#-project-structure)
+4. [8-Step Autonomous Case Lifecycle](#-8-step-autonomous-case-lifecycle)
+5. [TigerGraph Schema & GSQL Queries](#-tigergraph-schema--gsql-queries)
+6. [Database Seeder & Data Staging](#-database-seeder--data-staging)
+7. [Interactive Cockpit UI, Analytics Dashboard & Ledger](#-interactive-cockpit-ui-analytics-dashboard--ledger)
+8. [Official Benchmark Submission (cases/)](#-official-benchmark-submission-cases)
+9. [Quick Start & Local Setup](#-quick-start--local-setup)
+10. [Cloud Deployment (Render / Railway / Docker)](#-cloud-deployment-render--railway--docker)
 
 ---
+
+## 📸 Screenshots & UI Showcase
+
+### 1. Investigation Cockpit & Interactive Cardholder 2FA Simulator
+> Real-time 8-step lifecycle progression, TigerGraph 2-hop entity neighborhood graph visualization, and interactive iPhone 16 Pro simulator for cardholder push challenge.
+
+![TigerSentry Investigation Cockpit](screenshots/investigation_cockpit.jpg)
+
+### 2. Executive & Fraud Operations Dashboard (TigerGraph CRM)
+> Cross-case aggregate risk triage, FinCEN SAR compliance tracking, loss prevention metrics, fraud typology distribution, tiered approval routing, and enterprise CRM table.
+
+![TigerSentry Executive & Fraud Operations Dashboard](screenshots/executive_analytics_dashboard.jpg)
+
+### 3. Real IEEE-CIS Customer Transaction Ledger
+> Dedicated tab browsing across 26,643 indexed transactions, filtering by customer, channel (`W, H, C, R, S`), risk score threshold, and highlighted flagged trigger transactions.
+
+![TigerSentry Real IEEE-CIS Customer Transaction Ledger](screenshots/real_ieee_cis_transaction_ledger.jpg)
 
 ## 🏛️ System Architecture
 
@@ -215,21 +233,34 @@ python -m src.tigergraph.seeder
 
 ---
 
-## 📱 Interactive Cockpit UI & Banking Mock APIs
+## 📱 Interactive Cockpit UI, Analytics Dashboard & Ledger
 
-The platform includes an Observatory Cockpit UI running on FastAPI (`http://localhost:8000`) built with an Alpha-Fin Light Mode aesthetic (`#00836C` Observatory Green and `#FF5A00` TigerGraph Orange).
+The platform includes a modern Observatory UI running on FastAPI (`http://localhost:8000`) built with an Alpha-Fin Light Mode aesthetic (`#00836C` Observatory Green and `#FF5A00` TigerGraph Orange).
 
-### Key Cockpit Features:
-1. **Interactive 8-Step Lifecycle Progression**: Live step indicator showing real-time state transitions from Trigger to Case Memory.
-2. **Interactive iPhone 16 Pro Simulator**: Renders real-time interactive push notifications ("Did you authorize \$1,200 at Apple Store? [Yes, It Was Me] / [No, Block Card]").
-3. **TigerGraph 2-Hop Network Graph**: Interactive Vis.js canvas displaying transaction, account, device, IP, and merchant nodes.
-4. **Customer Transaction Ledger**: Paginated, filterable IEEE-CIS transaction history for each examined account.
-5. **Mock Banking API Execution Hub (`src/agent/action_dispatcher.py`)**:
-   - `CMS_API`: Card Management System (`BLOCK_CARD`)
-   - `CORE_BANKING_API`: Deposit Core Engine (`FREEZE_ACCOUNT`)
-   - `FINCEN_GATEWAY`: Regulatory e-Filing Gateway (`FILE_SAR`)
-   - `SALESFORCE_CRM`: Case Management CRM (`CREATE_CASE_RECORD`)
-   - `SETTLEMENT_GW`: Transaction Gateway (`ALLOW_TRANSACTION`)
+### 1. Investigation Cockpit
+- **Interactive 8-Step Lifecycle Progression**: Live step indicator showing real-time state transitions from Trigger to Case Memory.
+- **Interactive iPhone 16 Pro Simulator**: Renders real-time interactive push notifications ("Did you authorize \$77.07 on card 21139? [Yes, I Authorized This] / [No, Lock My Card] / [Simulate 10m Timeout]").
+- **TigerGraph 2-Hop Network Graph**: Interactive Vis.js canvas displaying transaction, account, device, IP, and merchant nodes.
+- **Evidence & Policy Citations**: Direct citations of graph traversal queries and bank policy rules (R1 to R10).
+- **Interactive "Ask AI Agent" Co-Pilot**: LLM assistant embedded directly in the cockpit to answer analyst questions grounded in graph topology.
+
+### 2. Executive & Fraud Operations Dashboard (TigerGraph CRM)
+- **Executive KPI Cards**: Total exam cases, confirmed fraud vs. cleared cases, prevented financial loss, and FinCEN SAR filing rate.
+- **Fraud Typology Distribution**: Automatic classification breakdown (`CARD_NOT_PRESENT_NEW_DEVICE`, `CARD_NOT_PRESENT_FRAUD`, `OUT_OF_REGION_USE`).
+- **Tiered Approval Routing**: Auditable segregation between auto-approved, Tier 1 Fraud Ops, and Tier 2 Risk Manager escalations.
+- **Enterprise CRM Case Table**: Live management pipeline across all 20 cases with 1-click `[Open Case]` buttons.
+
+### 3. Real IEEE-CIS Customer Transaction Ledger (26K Indexed Records)
+- **Full Historical Ledger**: Dedicated search, filter, and pagination console over 26,643 real IEEE-CIS transactions.
+- **Multi-Parameter Filtering**: Filter by customer profile (`cust_39433`, `cust_31481`, etc.), transaction channel (`W, H, C, R, S`), risk threshold slider, and "Flagged Triggers Only".
+- **Instant Investigation Deep-Link**: Jump directly from any customer's transaction row straight into the Investigation Cockpit.
+
+### 4. Mock Banking API Execution Hub (`src/agent/action_dispatcher.py`)
+- `CMS_API`: Card Management System (`BLOCK_CARD`)
+- `CORE_BANKING_API`: Deposit Core Engine (`FREEZE_ACCOUNT`)
+- `FINCEN_GATEWAY`: Regulatory e-Filing Gateway (`FILE_SAR`)
+- `SALESFORCE_CRM`: Case Management CRM (`CREATE_CASE_RECORD`)
+- `SETTLEMENT_GW`: Transaction Gateway (`ALLOW_TRANSACTION`)
 
 ---
 

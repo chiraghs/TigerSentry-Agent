@@ -29,6 +29,7 @@ from src.agent.models import (
 )
 from src.agent.investigator import OfficialFraudInvestigator
 from src.agent.action_dispatcher import ActionDispatcher
+from src.agent.llm_gateway import llm_gateway
 
 app = FastAPI(
     title="TigerSentry — TigerGraph Agentic Fraud Investigation",
@@ -58,6 +59,12 @@ class ExecuteAllPayload(BaseModel):
     context: Optional[Dict[str, Any]] = None
 
 
+class ChatPayload(BaseModel):
+    case_id: str
+    question: str
+    history: Optional[List[Dict[str, str]]] = None
+
+
 @app.post("/api/v1/actions/execute")
 def execute_downstream_action(payload: ExecuteActionPayload):
     """Dispatches a simulated mock banking API action."""
@@ -69,6 +76,25 @@ def execute_all_actions(payload: ExecuteAllPayload):
     """Dispatches a batch of simulated mock banking API actions."""
     return ActionDispatcher.execute_all(payload.actions, payload.case_id, payload.context)
 
+
+@app.get("/api/v1/llm/status")
+def get_llm_status():
+    """Returns runtime status of the active LLM provider (Gemini, Groq, OpenRouter, Mistral, Offline)."""
+    return llm_gateway.get_status()
+
+
+@app.post("/api/v1/agent/chat")
+def chat_with_agent(payload: ChatPayload):
+    """Interactive AI Co-Pilot chat assisting fraud analysts and judges exploring a case."""
+    case_data = get_case_details(payload.case_id)
+    reply = llm_gateway.chat_with_analyst(case_data, payload.question, payload.history)
+    return {
+        "case_id": payload.case_id,
+        "question": payload.question,
+        "response": reply,
+        "llm_provider": llm_gateway.active_provider,
+        "llm_model": llm_gateway.active_model
+    }
 
 
 @app.get("/health")
@@ -82,6 +108,9 @@ def health_check():
         "active_cases": len(list_cases()),
         "real_transactions_indexed": len(investigator._staged_data.get("all_matched_txns", [])) if investigator._staged_data else 0,
         "closed_cases_in_graph_memory": len(investigator._staged_data.get("closed_cases", [])) if investigator._staged_data else 0,
+        "llm_provider": llm_gateway.active_provider,
+        "llm_model": llm_gateway.active_model,
+        "llm_is_online": llm_gateway.get_status().get("is_online", False),
     }
 
 
@@ -614,17 +643,21 @@ def get_dashboard():
             </button>
         </nav>
 
-        <!-- System Stats / Dashboard Button / GitHub -->
-        <div class="flex items-center gap-2.5">
+        <!-- System Stats / Ask AI Agent / Dashboard / GitHub -->
+        <div class="flex items-center gap-2">
+            <button onclick="toggleAiChatModal()" class="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold transition flex items-center gap-1.5 shadow-2xs">
+                <i class="fa-solid fa-wand-magic-sparkles text-indigo-600"></i>
+                <span>Ask AI Agent</span>
+            </button>
+            <div id="header-llm-pill" class="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-[#F4F7F5] text-xs font-semibold text-slate-700 shadow-2xs">
+                <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span class="text-slate-400 font-medium">LLM:</span>
+                <span id="header-llm-name" class="font-bold text-[#00836C]">Auto (Gemini/Groq)</span>
+            </div>
             <button onclick="switchMainTab('analytics')" class="px-3 py-1.5 rounded-lg bg-orange-50 hover:bg-orange-100 text-[#FF5A00] border border-[#FF5A00]/30 text-xs font-bold transition flex items-center gap-1.5 shadow-2xs">
                 <i class="fa-solid fa-chart-line"></i>
                 <span>Dashboard</span>
             </button>
-            <div class="hidden xl:flex items-center gap-2 bg-[#F4F7F5] border border-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-[#0A1F1A]">
-                <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>TigerGraph Savanna:</span>
-                <span class="mono text-[#00836C] font-bold">&lt;0.85ms</span>
-            </div>
             <a href="https://github.com/chiraghs/TigerSentry-Agent" target="_blank" class="px-3 py-1.5 rounded-lg bg-[#00836C] hover:bg-[#006e5a] text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm">
                 <i class="fa-brands fa-github text-sm"></i> GitHub
             </a>
@@ -677,6 +710,11 @@ def get_dashboard():
                 </div>
 
                 <div class="flex items-center gap-3">
+                    <button onclick="toggleAiChatModal()" class="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs transition flex items-center gap-1.5 active:scale-95">
+                        <i class="fa-solid fa-wand-magic-sparkles text-amber-300"></i>
+                        <span>Ask AI Agent</span>
+                    </button>
+                    <div class="h-8 w-[1px] bg-slate-200"></div>
                     <div class="text-right">
                         <span class="text-[10px] uppercase font-bold text-[#7D8D86] tracking-wider block">Total Exposure</span>
                         <span id="active-exposure" class="text-lg font-extrabold text-[#0A1F1A]">$77.07</span>
@@ -1294,6 +1332,59 @@ def get_dashboard():
                 </div>
             </div>
         </div>
+    <!-- Interactive AI Investigator Co-Pilot Modal -->
+    <div id="ai-chat-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 flex flex-col max-h-[85vh]">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-200 shrink-0">
+                <div class="flex items-center gap-2.5">
+                    <div class="h-9 w-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow-xs">
+                        <i class="fa-solid fa-brain"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <h3 class="text-base font-extrabold text-[#0A1F1A]">TigerSentry AI Co-Pilot</h3>
+                            <span id="chat-modal-llm-badge" class="px-2 py-0.2 rounded-full text-[10px] font-mono font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">LLM Active</span>
+                        </div>
+                        <p class="text-xs text-[#7D8D86]">Ask questions about case reasoning, policy rules R1-R10, or SAR justifications</p>
+                    </div>
+                </div>
+                <button onclick="toggleAiChatModal()" class="text-slate-400 hover:text-slate-700 text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <!-- Quick Suggestions -->
+            <div class="py-2.5 flex flex-wrap gap-1.5 border-b border-slate-100 shrink-0">
+                <button onclick="sendQuickQuestion('Why was BLOCK_CARD recommended instead of DECLINE_TRANSACTION?')" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-medium transition">
+                    💡 Why BLOCK_CARD?
+                </button>
+                <button onclick="sendQuickQuestion('Is a FinCEN SAR mandatory under Bank Policy Rule R2?')" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-medium transition">
+                    📜 SAR Mandatory?
+                </button>
+                <button onclick="sendQuickQuestion('What evidence did TigerGraph multi-hop traversal uncover?')" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-medium transition">
+                    🐅 Graph Evidence
+                </button>
+            </div>
+
+            <!-- Chat History -->
+            <div id="ai-chat-history" class="flex-1 overflow-y-auto p-3 space-y-3 min-h-[220px] max-h-[350px]">
+                <div class="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 leading-relaxed">
+                    <span class="font-bold text-[#00836C] block mb-1">🤖 TigerSentry Agent:</span>
+                    Hello! I have analyzed this case using TigerGraph multi-hop neighborhood traversals and Bank Fraud Policy v1.0. Ask me anything about the diagnosis, evidence, uncertainty calculation, or next-best actions!
+                </div>
+            </div>
+
+            <!-- Chat Input -->
+            <div class="pt-3 border-t border-slate-200 shrink-0">
+                <form onsubmit="handleChatSubmit(event)" class="flex items-center gap-2">
+                    <input type="text" id="ai-chat-input" placeholder="Ask a question about this case..." class="flex-1 px-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-[#00836C] transition">
+                    <button type="submit" id="btn-send-chat" class="px-4 py-2 rounded-xl bg-[#00836C] hover:bg-[#00594A] text-white font-bold text-xs transition flex items-center gap-1.5 shadow-sm">
+                        <span>Ask</span>
+                        <i class="fa-solid fa-paper-plane text-[10px]"></i>
+                    </button>
+                </form>
+            </div>
+        </div>
     </div>
 
     <!-- SAR Modal -->
@@ -1443,6 +1534,112 @@ def get_dashboard():
         let currentLedgerPage = 1;
         let totalLedgerPages = 1;
         let ledgerSearchTimeout = null;
+        let activeLlmInfo = { provider: 'offline', model: 'deterministic-graphrag', is_online: false };
+
+        async function fetchLlmStatus() {
+            try {
+                const res = await fetch('/api/v1/llm/status');
+                activeLlmInfo = await res.json();
+                const nameElem = document.getElementById('header-llm-name');
+                if (nameElem) {
+                    nameElem.innerText = `${activeLlmInfo.provider.toUpperCase()} (${activeLlmInfo.model})`;
+                }
+                const modalBadge = document.getElementById('chat-modal-llm-badge');
+                if (modalBadge) {
+                    modalBadge.innerText = activeLlmInfo.is_online ? `LLM: ${activeLlmInfo.provider.toUpperCase()} (Online)` : 'LLM: GraphRAG Rule Reasoner (Offline Safe)';
+                    modalBadge.className = activeLlmInfo.is_online ? "px-2 py-0.2 rounded-full text-[10px] font-mono font-bold bg-emerald-100 text-emerald-800 border border-emerald-200" : "px-2 py-0.2 rounded-full text-[10px] font-mono font-bold bg-indigo-50 text-indigo-700 border border-indigo-200";
+                }
+            } catch (err) {
+                console.error("Error fetching LLM status:", err);
+            }
+        }
+
+        function toggleAiChatModal() {
+            const modal = document.getElementById('ai-chat-modal');
+            if (!modal) return;
+            if (modal.classList.contains('hidden')) {
+                modal.classList.remove('hidden');
+                document.getElementById('ai-chat-input')?.focus();
+            } else {
+                modal.classList.add('hidden');
+            }
+        }
+
+        function sendQuickQuestion(questionText) {
+            const input = document.getElementById('ai-chat-input');
+            if (input) {
+                input.value = questionText;
+                submitAiQuestion(questionText);
+            }
+        }
+
+        function handleChatSubmit(e) {
+            e.preventDefault();
+            const input = document.getElementById('ai-chat-input');
+            const question = input.value.trim();
+            if (!question) return;
+            input.value = '';
+            submitAiQuestion(question);
+        }
+
+        async function submitAiQuestion(question) {
+            const history = document.getElementById('ai-chat-history');
+            if (!history) return;
+
+            // Append User Question
+            const userMsg = document.createElement('div');
+            userMsg.className = "p-3 rounded-xl bg-indigo-50 border border-indigo-100 text-xs text-indigo-950 font-medium ml-4 leading-relaxed";
+            userMsg.innerHTML = `<span class="font-bold text-indigo-700 block mb-0.5">👤 Investigator:</span>${escapeHtml(question)}`;
+            history.appendChild(userMsg);
+
+            // Append Loading Indicator
+            const loadingMsg = document.createElement('div');
+            loadingMsg.id = 'chat-loading-indicator';
+            loadingMsg.className = "p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-500 mr-4 flex items-center gap-2";
+            loadingMsg.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin text-[#00836C]"></i><span>Thinking with ${activeLlmInfo.provider}...</span>`;
+            history.appendChild(loadingMsg);
+            history.scrollTop = history.scrollHeight;
+
+            try {
+                const res = await fetch('/api/v1/agent/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        case_id: activeCaseId || 'HHG-001',
+                        question: question
+                    })
+                });
+                const data = await res.json();
+                loadingMsg.remove();
+
+                const agentMsg = document.createElement('div');
+                agentMsg.className = "p-3 rounded-xl bg-white border border-slate-200 text-xs text-slate-800 leading-relaxed mr-4 shadow-2xs";
+                agentMsg.innerHTML = `
+                    <div class="flex items-center justify-between mb-1 pb-1 border-b border-slate-100">
+                        <span class="font-bold text-[#00836C] flex items-center gap-1.5"><i class="fa-solid fa-robot"></i> TigerSentry Agent:</span>
+                        <span class="text-[9px] font-mono text-slate-400 bg-slate-50 px-1.5 py-0.2 rounded">${data.llm_provider || 'auto'} · ${data.llm_model || 'model'}</span>
+                    </div>
+                    <div class="text-slate-800 text-xs whitespace-pre-line leading-relaxed">${escapeHtml(data.response || 'No response.')}</div>
+                `;
+                history.appendChild(agentMsg);
+                history.scrollTop = history.scrollHeight;
+            } catch (err) {
+                loadingMsg.remove();
+                const errDiv = document.createElement('div');
+                errDiv.className = "p-2 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700";
+                errDiv.innerText = `Error contacting AI agent: ${err.message}`;
+                history.appendChild(errDiv);
+            }
+        }
+
+        function escapeHtml(text) {
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
 
         function switchMainTab(tabName) {
             currentTab = tabName;
@@ -2354,7 +2551,10 @@ def get_dashboard():
             currentNetwork = new vis.Network(container, graphData, options);
         }
 
-        window.onload = fetchCases;
+        window.onload = () => {
+            fetchLlmStatus();
+            fetchCases();
+        };
     </script>
 
 </body>

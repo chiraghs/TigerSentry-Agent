@@ -337,9 +337,26 @@ Simply connect your GitHub repository (`chiraghs/TigerSentry-Agent`) to Render o
 
 ---
 
+## 🤖 Free LLM Configuration on Render
+
+TigerSentry supports **plug-and-play Free LLM providers** controllable directly via Render Environment Variables:
+
+| Provider | Recommended Render Env Setting | Free Tier Benefit |
+|:---|:---|:---|
+| **Google Gemini (Recommended)** | `LLM_PROVIDER=gemini`<br>`GEMINI_API_KEY=AIzaSy...`<br>`LLM_MODEL=gemini-2.5-flash` | 15 RPM, 1M TPM free via Google AI Studio |
+| **Groq Cloud** | `LLM_PROVIDER=groq`<br>`GROQ_API_KEY=gsk_...`<br>`LLM_MODEL=llama-3.3-70b-versatile` | Ultra-fast LLaMA 3.3 70B inference |
+| **OpenRouter** | `LLM_PROVIDER=openrouter`<br>`OPENROUTER_API_KEY=sk-or-...`<br>`LLM_MODEL=meta-llama/llama-3.1-8b-instruct:free` | Free open-source model routing |
+| **Mistral AI** | `LLM_PROVIDER=mistral`<br>`MISTRAL_API_KEY=...`<br>`LLM_MODEL=mistral-small-latest` | Free developer experiment tier |
+| **Offline GraphRAG** | `LLM_PROVIDER=offline` (or leave empty) | 100% deterministic, 0 API keys required |
+
+> [!TIP]
+> **Automatic Key Detection**: If you set `LLM_PROVIDER=auto` (default), TigerSentry automatically detects whichever key you added to Render (`GEMINI_API_KEY`, `GROQ_API_KEY`, or `OPENROUTER_API_KEY`). If no key is set, it gracefully defaults to the built-in deterministic GraphRAG engine without raising errors.
+
+---
+
 ## 👥 Hackathon Details & Meta Information
 - **Project**: TigerSentry Agent
 - **Hackathon**: TigerGraph × Hacker House Goa (HHGOA)
-- **Primary LLM Model**: `Gemini 2.5 Flash / Pro (Google DeepMind)`
+- **Primary LLM Model**: `Gemini 2.5 Flash / Pro (Google DeepMind)` / `Groq Llama 3.3` (configurable)
 - **Agent Framework**: Custom Lightweight Reactive Agent Framework (Python 3.12 + FastAPI + TigerGraph GraphRAG + Pydantic v2)
 - **Repository**: [https://github.com/chiraghs/TigerSentry-Agent](https://github.com/chiraghs/TigerSentry-Agent)

@@ -1,29 +1,33 @@
-import pytest
-from src.actions.mock_services import MockEvidenceService, MockActionExecutionService
-from src.agent.models import SARReport
+"""
+Tests for downstream mock banking API actions via ActionDispatcher.
+"""
+
+from src.agent.action_dispatcher import ActionDispatcher
 
 
-def test_mock_evidence_service():
-    service = MockEvidenceService()
-    
-    # Test user confirmed
-    service.set_simulation_scenario("USER_CONFIRMED")
-    resp = service.request_customer_validation("cust_legit", "txn_101", 150.0)
-    assert resp.customer_confirmed_legitimate is True
-
-    # Test user fraud alert
-    service.set_simulation_scenario("USER_FRAUD_ALERT")
-    resp_fraud = service.request_customer_validation("cust_fraud", "txn_102", 1500.0)
-    assert resp_fraud.customer_confirmed_legitimate is False
-
-    # Test step up auth failure
-    service.set_simulation_scenario("MFA_FAILED")
-    resp_mfa = service.request_step_up_auth("cust_mfa")
-    assert resp_mfa.mfa_passed is False
-
-
-def test_mock_action_execution():
-    actions = MockActionExecutionService()
-    res = actions.block_card("CARD_999", "Velocity breach", "AUTO_POLICY")
+def test_action_dispatcher_block_card():
+    res = ActionDispatcher.execute_action("BLOCK_CARD", "HHG-001", {"card_id": "CARD-TEST-01"})
     assert res["status"] == "EXECUTED"
-    assert len(actions.action_history) == 1
+    assert res["http_status"] == 200
+    assert "CMS" in res["system"]
+
+
+def test_action_dispatcher_freeze_account():
+    res = ActionDispatcher.execute_action("FREEZE_ACCOUNT", "HHG-001", {"customer_id": "CUST-TEST-01"})
+    assert res["status"] == "EXECUTED"
+    assert res["http_status"] == 200
+    assert "Deposit Core" in res["system"]
+
+
+def test_action_dispatcher_file_report():
+    res = ActionDispatcher.execute_action("FILE_REPORT", "HHG-001", {"exposure_usd": 1500.0})
+    assert res["status"] == "SUBMITTED"
+    assert res["http_status"] in (200, 201)
+    assert "FinCEN" in res["system"]
+
+
+def test_action_dispatcher_execute_all():
+    actions = ["BLOCK_CARD", "CREATE_CASE", "FILE_REPORT"]
+    results = ActionDispatcher.execute_all(actions, "HHG-001")
+    assert len(results) == 3
+    assert all(r["http_status"] in (200, 201) for r in results)
